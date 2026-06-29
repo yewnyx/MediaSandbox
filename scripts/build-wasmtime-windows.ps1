@@ -46,7 +46,7 @@ cargo build `
     --manifest-path wasmtime-src/Cargo.toml `
     -p wasmtime-c-api `
     --release `
-    --features wasmtime/pulley
+    --features pulley
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 New-Item -ItemType Directory -Force $Dest | Out-Null
