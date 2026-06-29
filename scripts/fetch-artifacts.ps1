@@ -1,5 +1,5 @@
 #Requires -Version 7
-# Fetch the latest successful CI build artifacts and merge them into unity_package/.
+# Fetch the latest successful CI build artifacts and place them in the repo.
 #
 # Requires: gh CLI authenticated to the repo  (gh auth login)
 #
@@ -9,7 +9,7 @@
 #   pwsh scripts/fetch-artifacts.ps1 -Run 12345678      # specific run ID
 param(
     [Parameter(Position = 0, ValueFromRemainingArguments)]
-    [string[]] $Artifacts = @('wasm', 'windows', 'macos', 'linux', 'ios'),
+    [string[]] $Artifacts = @('wasm', 'windows', 'macos', 'linux', 'ios', 'android'),
 
     [string] $Run = ''
 )
@@ -22,10 +22,55 @@ $artifactNames = @{
     macos   = 'wasmtime-macos-universal'
     linux   = 'wasmtime-linux-x64'
     ios     = 'wasmtime-ios-pulley'
+    android = 'wasmtime-android'
 }
 
 $RepoRoot = Split-Path $PSScriptRoot -Parent
 $TmpDir   = Join-Path ([System.IO.Path]::GetTempPath()) "mediasandbox-artifacts-$(Get-Random)"
+
+function Install-Artifact([string]$art, [string]$src) {
+    switch ($art) {
+        'wasm' {
+            $dst = Join-Path $RepoRoot 'Assets\StreamingAssets\mediasandbox'
+            New-Item -ItemType Directory -Force $dst | Out-Null
+            Copy-Item (Join-Path $src 'decoder.wasm') (Join-Path $dst 'decoder.wasm') -Force
+            Write-Host '    → Assets/StreamingAssets/mediasandbox/decoder.wasm'
+        }
+        'windows' {
+            $dst = Join-Path $RepoRoot 'unity_package\Plugins\x86_64'
+            New-Item -ItemType Directory -Force $dst | Out-Null
+            Copy-Item (Join-Path $src 'wasmtime.dll') (Join-Path $dst 'wasmtime.dll') -Force
+            Write-Host '    → unity_package/Plugins/x86_64/wasmtime.dll'
+        }
+        'macos' {
+            $dst = Join-Path $RepoRoot 'unity_package\Plugins\x86_64'
+            New-Item -ItemType Directory -Force $dst | Out-Null
+            Copy-Item (Join-Path $src 'libwasmtime.dylib') (Join-Path $dst 'libwasmtime.dylib') -Force
+            Write-Host '    → unity_package/Plugins/x86_64/libwasmtime.dylib'
+        }
+        'linux' {
+            $dst = Join-Path $RepoRoot 'unity_package\Plugins\x86_64'
+            New-Item -ItemType Directory -Force $dst | Out-Null
+            Copy-Item (Join-Path $src 'libwasmtime.so') (Join-Path $dst 'libwasmtime.so') -Force
+            Write-Host '    → unity_package/Plugins/x86_64/libwasmtime.so'
+        }
+        'ios' {
+            $dst = Join-Path $RepoRoot 'unity_package\Plugins\iOS\Wasmtime.xcframework'
+            if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
+            New-Item -ItemType Directory -Force (Split-Path $dst) | Out-Null
+            Copy-Item $src $dst -Recurse -Force
+            Write-Host '    → unity_package/Plugins/iOS/Wasmtime.xcframework/'
+        }
+        'android' {
+            $dst = Join-Path $RepoRoot 'unity_package\Plugins\Android\libs'
+            New-Item -ItemType Directory -Force $dst | Out-Null
+            Get-ChildItem $src | ForEach-Object {
+                Copy-Item $_.FullName (Join-Path $dst $_.Name) -Recurse -Force
+            }
+            Write-Host '    → unity_package/Plugins/Android/libs/'
+        }
+    }
+}
 
 try {
     New-Item -ItemType Directory -Force $TmpDir | Out-Null
@@ -34,7 +79,7 @@ try {
         Write-Host '==> Finding latest successful run on main...'
         $Run = (gh run list `
             --workflow build.yml `
-            --branch main `
+            --branch master `
             --status success `
             --limit 1 `
             --json databaseId `
@@ -61,19 +106,7 @@ try {
             continue
         }
 
-        # decoder-wasm lands in Assets/StreamingAssets/; everything else in unity_package/.
-        if ($art -eq 'wasm') {
-            $dstSA = Join-Path $RepoRoot 'Assets\StreamingAssets\mediasandbox'
-            New-Item -ItemType Directory -Force $dstSA | Out-Null
-            Copy-Item (Join-Path $artTmp 'decoder.wasm') (Join-Path $dstSA 'decoder.wasm') -Force
-            Write-Host '    Copied → Assets/StreamingAssets/mediasandbox/decoder.wasm'
-        } else {
-            $dstPkg = Join-Path $RepoRoot 'unity_package'
-            Get-ChildItem $artTmp | ForEach-Object {
-                Copy-Item $_.FullName (Join-Path $dstPkg $_.Name) -Recurse -Force
-            }
-            Write-Host '    Merged into unity_package/'
-        }
+        Install-Artifact $art $artTmp
     }
 } finally {
     Remove-Item $TmpDir -Recurse -Force -ErrorAction SilentlyContinue
