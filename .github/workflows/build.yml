@@ -143,3 +143,33 @@ jobs:
         with:
           name: wasmtime-ios-pulley
           path: unity_package/Plugins/iOS/Wasmtime.xcframework/
+
+  # ── Wasmtime — Android ───────────────────────────────────────────────────────
+  android-wasmtime:
+    name: Wasmtime Android (Pulley)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust Android targets
+        run: rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: android-wasmtime-cargo-${{ env.WASMTIME_REF }}
+          restore-keys: android-wasmtime-cargo-
+
+      - name: Build
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
+        run: bash scripts/build-wasmtime-android.sh "$WASMTIME_REF"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasmtime-android
+          path: unity_package/Plugins/Android/libs/
