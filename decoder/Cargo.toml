@@ -19,3 +19,9 @@ symphonia = { version = "0.5", default-features = false, features = [
 opt-level = "z"
 lto = true
 strip = true
+
+[profile.release-with-debuginfo]
+inherits = "release"
+debug = true
+split-debuginfo = "packed"
+strip = "debuginfo"

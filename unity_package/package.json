@@ -1,0 +1,12 @@
+{
+  "name": "xyz.yewnyx.mediasandbox",
+  "version": "0.1.0",
+  "displayName": "Media Sandbox",
+  "description": "Drag-and-drop media preview tool for Unity Editor play mode. Decodes images, animations, and audio via a Wasmtime-hosted WASM sandbox.",
+  "unity": "2022.3",
+  "keywords": ["media", "wasm", "sandbox", "wasmtime"],
+  "author": {
+    "name": "yewnyx",
+    "email": "yewnyx@yewnyx.xyz"
+  }
+}

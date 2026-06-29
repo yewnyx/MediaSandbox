@@ -14,8 +14,6 @@ namespace xyz.yewnyx.MediaSandbox
     /// </summary>
     public sealed class MediaDecoderSandbox : MonoBehaviour
     {
-        private const string WasmPath = "Assets/media~/decoder.wasm";
-
         // Shared (thread-safe)
         private Engine _engine;
         private Linker _linker;
@@ -29,10 +27,85 @@ namespace xyz.yewnyx.MediaSandbox
 
         private void Awake()
         {
+#if !MEDIA_SANDBOX_NO_PULLEY
+            // Pulley is Wasmtime's portable bytecode interpreter — required on platforms
+            // where JIT is prohibited (iOS). Activated by setting target to "pulley64".
+            // Define MEDIA_SANDBOX_NO_PULLEY to fall back to Cranelift JIT instead.
+            //
+            // The native wasmtime library must be built with the `pulley` cargo feature.
+            // See .github/workflows/build.yml and scripts/build-wasmtime-*.sh.
+            _engine = new Engine(MakePulleyConfig());
+            if (!_engine.IsPulleyInterpreter)
+                throw new InvalidOperationException(
+                    "[MediaSandbox] Expected Pulley interpreter but Wasmtime is using Cranelift. " +
+                    "Ensure the native wasmtime library was built with --features pulley, " +
+                    "or define MEDIA_SANDBOX_NO_PULLEY to use Cranelift explicitly.");
+#else
             _engine = new Engine();
+#endif
             _linker = new Linker(_engine);
             _linker.DefineWasi();
             _module = Module.FromFile(_engine, WasmPath);
+        }
+
+        // ── Pulley config shim ────────────────────────────────────────────────
+        // Config.WithTarget() is absent from Wasmtime .NET v44's public API.
+        // We call wasmtime_config_target_set from the C API directly, reaching
+        // the raw wasm_config_t* via reflection on the SDK's private handle field.
+
+        [DllImport("wasmtime", EntryPoint = "wasmtime_config_target_set",
+                   CallingConvention = CallingConvention.Cdecl)]
+        private static extern IntPtr NativeConfigTargetSet(
+            IntPtr config, [MarshalAs(UnmanagedType.LPUTF8Str)] string? target);
+
+        private static Config MakePulleyConfig()
+        {
+            var config = new Config();
+
+            // Walk the SDK's private fields to find the raw wasm_config_t* handle.
+            IntPtr nativeHandle = IntPtr.Zero;
+            const System.Reflection.BindingFlags flags =
+                System.Reflection.BindingFlags.NonPublic |
+                System.Reflection.BindingFlags.Instance;
+
+            foreach (var field in typeof(Config).GetFields(flags))
+            {
+                var val = field.GetValue(config);
+                if (val is IntPtr p && p != IntPtr.Zero)
+                {
+                    nativeHandle = p;
+                    break;
+                }
+                if (val is SafeHandle sh && !sh.IsInvalid)
+                {
+                    nativeHandle = sh.DangerousGetHandle();
+                    break;
+                }
+                if (val != null && val.GetType().IsValueType)
+                {
+                    foreach (var inner in val.GetType().GetFields(flags))
+                    {
+                        if (inner.GetValue(val) is IntPtr ip && ip != IntPtr.Zero)
+                        {
+                            nativeHandle = ip;
+                            break;
+                        }
+                    }
+                    if (nativeHandle != IntPtr.Zero) break;
+                }
+            }
+
+            if (nativeHandle == IntPtr.Zero)
+                throw new InvalidOperationException(
+                    "[MediaSandbox] Could not locate Wasmtime Config handle via reflection. " +
+                    "The SDK's internal layout may have changed.");
+
+            var err = NativeConfigTargetSet(nativeHandle, "pulley64");
+            if (err != IntPtr.Zero)
+                throw new InvalidOperationException(
+                    "[MediaSandbox] wasmtime_config_target_set(\"pulley64\") failed.");
+
+            return config;
         }
 
         private void OnDestroy()
@@ -41,6 +114,9 @@ namespace xyz.yewnyx.MediaSandbox
             _linker?.Dispose();
             _engine?.Dispose();
         }
+
+        private static string WasmPath =>
+            System.IO.Path.Combine(Application.streamingAssetsPath, "mediasandbox", "decoder.wasm");
 
         // ── Per-call instance creation ────────────────────────────────────────
 

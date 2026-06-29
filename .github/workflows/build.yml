@@ -1,0 +1,145 @@
+name: Build
+
+on:
+  push:
+    branches: [main, master, test-*]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Must match the Wasmtime NuGet package version vendored in Assets/Packages/.
+  # Pass as the [ref] argument to the build-wasmtime-*.sh scripts.
+  WASMTIME_REF: v44.0.0
+
+jobs:
+  # ── decoder.wasm ─────────────────────────────────────────────────────────────
+  wasm:
+    name: decoder.wasm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: wasm-cargo-${{ hashFiles('decoder/Cargo.lock') }}
+          restore-keys: wasm-cargo-
+
+      - name: Build
+        run: bash scripts/build-wasm.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: decoder-wasm
+          path: Assets/StreamingAssets/mediasandbox/decoder.wasm
+
+  # ── Wasmtime — Windows x64 ───────────────────────────────────────────────────
+  windows-wasmtime:
+    name: Wasmtime Windows x64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: windows-wasmtime-cargo-${{ env.WASMTIME_REF }}
+          restore-keys: windows-wasmtime-cargo-
+
+      - name: Build
+        run: pwsh scripts/build-wasmtime-windows.ps1 -Ref $env:WASMTIME_REF
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasmtime-windows-x64
+          path: unity_package/Plugins/x86_64/wasmtime.dll
+
+  # ── Wasmtime — macOS universal ────────────────────────────────────────────────
+  macos-wasmtime:
+    name: Wasmtime macOS universal
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust targets
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: macos-wasmtime-cargo-${{ env.WASMTIME_REF }}
+          restore-keys: macos-wasmtime-cargo-
+
+      - name: Build
+        run: bash scripts/build-wasmtime-macos.sh "$WASMTIME_REF"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasmtime-macos-universal
+          path: unity_package/Plugins/x86_64/libwasmtime.dylib
+
+  # ── Wasmtime — Linux x64 ─────────────────────────────────────────────────────
+  linux-wasmtime:
+    name: Wasmtime Linux x64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: linux-wasmtime-cargo-${{ env.WASMTIME_REF }}
+          restore-keys: linux-wasmtime-cargo-
+
+      - name: Build
+        run: bash scripts/build-wasmtime-linux.sh "$WASMTIME_REF"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasmtime-linux-x64
+          path: unity_package/Plugins/x86_64/libwasmtime.so
+
+  # ── Wasmtime — iOS (Pulley) ───────────────────────────────────────────────────
+  ios-wasmtime:
+    name: Wasmtime iOS (Pulley)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust iOS targets
+        run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ios-wasmtime-cargo-${{ env.WASMTIME_REF }}
+          restore-keys: ios-wasmtime-cargo-
+
+      - name: Build
+        run: bash scripts/build-wasmtime-ios.sh "$WASMTIME_REF"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasmtime-ios-pulley
+          path: unity_package/Plugins/iOS/Wasmtime.xcframework/

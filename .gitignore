@@ -78,3 +78,6 @@ crashlytics-build.properties
 
 # Rust decoder build artifacts
 /decoder/target/
+
+# Wasmtime source tree (cloned by scripts/build-wasmtime-*.sh / .ps1)
+/wasmtime-src/
