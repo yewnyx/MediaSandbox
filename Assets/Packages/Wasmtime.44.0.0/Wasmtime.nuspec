@@ -1,0 +1,29 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+  <metadata>
+    <id>Wasmtime</id>
+    <version>44.0.0</version>
+    <title>Wasmtime</title>
+    <authors>Peter Huene</authors>
+    <license type="expression">Apache-2.0 WITH LLVM-exception</license>
+    <licenseUrl>https://licenses.nuget.org/Apache-2.0%20WITH%20LLVM-exception</licenseUrl>
+    <readme>README.md</readme>
+    <description>A .NET embedding of Wasmtime.
+
+Wasmtime is a standalone runtime for WebAssembly, using the Cranelift JIT compiler.
+
+The .NET embedding of Wasmtime enables .NET code to instantiate WebAssembly modules and to interact with them in-process.</description>
+    <releaseNotes>Update Wasmtime to 44.0.0.</releaseNotes>
+    <tags>webassembly, .net, wasm, wasmtime</tags>
+    <repository type="git" url="https://github.com/bytecodealliance/wasmtime-dotnet" commit="c1b7f660ce490f7acf757b558235b0c916e802e0" />
+    <dependencies>
+      <group targetFramework="net8.0" />
+      <group targetFramework="net9.0" />
+      <group targetFramework=".NETStandard2.0">
+        <dependency id="IndexRange" version="1.0.2" exclude="Build,Analyzers" />
+        <dependency id="System.Memory" version="4.5.5" exclude="Build,Analyzers" />
+      </group>
+      <group targetFramework=".NETStandard2.1" />
+    </dependencies>
+  </metadata>
+</package>
