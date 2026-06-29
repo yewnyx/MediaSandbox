@@ -23,7 +23,9 @@ pub fn decode(data: &[u8], target_w: u32, target_h: u32) -> Result<Vec<u8>, Stri
         img
     };
 
-    Ok(img.into_rgba8().into_raw())
+    // Unity's LoadRawTextureData expects bottom-to-top row order (OpenGL convention).
+    // The image crate returns top-to-bottom, so flip unconditionally.
+    Ok(img.flipv().into_rgba8().into_raw())
 }
 
 pub fn encode(rgba: &[u8], width: u32, height: u32, format: u32) -> Result<Vec<u8>, String> {
