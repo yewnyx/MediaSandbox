@@ -163,9 +163,12 @@ jobs:
           key: android-wasmtime-cargo-${{ env.WASMTIME_REF }}
           restore-keys: android-wasmtime-cargo-
 
+      - name: Locate Android NDK
+        run: |
+          NDK_DIR="$(ls -d "$ANDROID_SDK_ROOT"/ndk/*/ | sort -V | tail -1)"
+          echo "ANDROID_NDK_HOME=$NDK_DIR" >> "$GITHUB_ENV"
+
       - name: Build
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
         run: bash scripts/build-wasmtime-android.sh "$WASMTIME_REF"
 
       - name: Upload artifact

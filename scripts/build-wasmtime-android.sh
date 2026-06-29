@@ -29,8 +29,7 @@ declare -a TARGETS=("aarch64-linux-android" "armv7-linux-androideabi" "x86_64-li
 # ── Validate environment ──────────────────────────────────────────────────────
 if [[ -z "${ANDROID_NDK_HOME:-}" ]]; then
     echo "ERROR: ANDROID_NDK_HOME is not set."
-    echo "       Point it to your Android NDK installation, e.g.:"
-    echo "       export ANDROID_NDK_HOME=\$HOME/Library/Android/sdk/ndk/<version>"
+    echo "       export ANDROID_NDK_HOME=\$ANDROID_SDK_ROOT/ndk/<version>"
     exit 1
 fi
 
