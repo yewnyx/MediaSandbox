@@ -79,7 +79,7 @@ try {
         Write-Host '==> Finding latest successful run on main...'
         $Run = (gh run list `
             --workflow build.yml `
-            --branch master `
+            --branch main `
             --status success `
             --limit 1 `
             --json databaseId `
