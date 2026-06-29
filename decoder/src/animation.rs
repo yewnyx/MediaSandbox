@@ -1,5 +1,5 @@
 use std::io::Cursor;
-use image::{AnimationDecoder, RgbaImage};
+use image::{imageops, AnimationDecoder, DynamicImage, RgbaImage};
 
 fn is_gif(data: &[u8]) -> bool {
     data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a")
@@ -21,8 +21,25 @@ pub fn query(data: &[u8]) -> Result<(u32, u32, u32), String> {
 }
 
 // Returns Vec<(delay_ms, RgbaImage)>
-pub fn decode(data: &[u8]) -> Result<Vec<(u32, RgbaImage)>, String> {
-    decode_frames(data)
+// TODO(perf): decode frames at target size without full-resolution intermediates.
+pub fn decode(data: &[u8], target_w: u32, target_h: u32) -> Result<Vec<(u32, RgbaImage)>, String> {
+    let frames = decode_frames(data)?;
+    if target_w == 0 || target_h == 0 {
+        return Ok(frames);
+    }
+    Ok(frames
+        .into_iter()
+        .map(|(delay, img)| {
+            if img.width() != target_w || img.height() != target_h {
+                let resized = DynamicImage::ImageRgba8(img)
+                    .resize_exact(target_w, target_h, imageops::FilterType::Triangle)
+                    .into_rgba8();
+                (delay, resized)
+            } else {
+                (delay, img)
+            }
+        })
+        .collect())
 }
 
 fn decode_frames(data: &[u8]) -> Result<Vec<(u32, RgbaImage)>, String> {

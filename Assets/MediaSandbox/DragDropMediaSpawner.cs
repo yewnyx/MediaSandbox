@@ -94,7 +94,7 @@ namespace xyz.yewnyx.MediaSandbox
             }
 
             // Back on main thread after await — Unity API safe
-            SpawnTexturedQuad(name, raw.Width, raw.Height, raw.Rgba);
+            SpawnTexturedQuad(name, raw.Width, raw.Height, raw.Rgba, attrs.CanHaveAlpha);
         }
 
         // ── Animation ─────────────────────────────────────────────────────────
@@ -119,11 +119,11 @@ namespace xyz.yewnyx.MediaSandbox
             if (anim.Frames.Length == 1)
             {
                 // Single-frame animation — treat as still image
-                SpawnTexturedQuad(name, anim.Width, anim.Height, anim.Frames[0].Rgba);
+                SpawnTexturedQuad(name, anim.Width, anim.Height, anim.Frames[0].Rgba, attrs.CanHaveAlpha);
             }
             else
             {
-                SpawnAnimatedQuad(name, anim);
+                SpawnAnimatedQuad(name, anim, attrs.CanHaveAlpha);
             }
         }
 
@@ -161,43 +161,64 @@ namespace xyz.yewnyx.MediaSandbox
 
         // ── Helpers ───────────────────────────────────────────────────────────
 
-        private static void SpawnTexturedQuad(string name, int width, int height, byte[] rgba)
+        private static Vector3 AspectScale(int width, int height) =>
+            new Vector3(width / (float)height, 1f, 1f);
+
+        /// Scans RGBA bytes for any pixel with alpha < 255. Early-exits on first hit.
+        private static bool HasAnyTransparency(byte[] rgba)
         {
-            var tex = new Texture2D(width, height, TextureFormat.RGBA32, mipChain: false);
+            for (int i = 3; i < rgba.Length; i += 4)
+                if (rgba[i] < 255) return true;
+            return false;
+        }
+
+        private static void SpawnTexturedQuad(string name, int width, int height, byte[] rgba, bool canHaveAlpha)
+        {
+            // linear: false — sRGB-encoded input; GPU linearises during sampling in a linear-space project.
+            var tex = new Texture2D(width, height, TextureFormat.RGBA32, mipChain: false, linear: false);
             tex.LoadRawTextureData(rgba);
             tex.Apply();
 
             var go  = GameObject.CreatePrimitive(PrimitiveType.Quad);
             go.name = $"[Image] {name}";
-            go.transform.position = Vector3.zero;
+            go.transform.position   = Vector3.zero;
+            go.transform.localScale = AspectScale(width, height);
 
-            var mat = new Material(Shader.Find("Unlit/Texture"));
+            bool hasAlpha  = canHaveAlpha && HasAnyTransparency(rgba);
+            var shaderName = hasAlpha ? "Unlit/Transparent" : "Unlit/Texture";
+            var mat        = new Material(Shader.Find(shaderName));
             mat.mainTexture = tex;
             go.GetComponent<MeshRenderer>().material = mat;
 
-            Debug.Log($"[MediaSandbox] Spawned image '{name}' ({width}×{height})");
+            Debug.Log($"[MediaSandbox] Spawned image '{name}' ({width}×{height}{(hasAlpha ? ", alpha" : "")})");
         }
 
-        private void SpawnAnimatedQuad(string name, AnimatedImageData anim)
+        private void SpawnAnimatedQuad(string name, AnimatedImageData anim, bool canHaveAlpha)
         {
             var go  = GameObject.CreatePrimitive(PrimitiveType.Quad);
             go.name = $"[Anim] {name}";
-            go.transform.position = Vector3.zero;
+            go.transform.position   = Vector3.zero;
+            go.transform.localScale = AspectScale(anim.Width, anim.Height);
 
-            var mat = new Material(Shader.Find("Unlit/Texture"));
+            // Scan the first frame to decide the shader; assume all frames share the same alpha state.
+            bool hasAlpha  = canHaveAlpha && anim.Frames.Length > 0 && HasAnyTransparency(anim.Frames[0].Rgba);
+            var shaderName = hasAlpha ? "Unlit/Transparent" : "Unlit/Texture";
+            var mat        = new Material(Shader.Find(shaderName));
             go.GetComponent<MeshRenderer>().material = mat;
 
-            // Bake all frame textures up front
+            // Bake all frame textures up front.
+            // linear: false — sRGB-encoded input; GPU linearises during sampling in a linear-space project.
             var textures = new Texture2D[anim.Frames.Length];
             for (int i = 0; i < anim.Frames.Length; i++)
             {
-                var t = new Texture2D(anim.Width, anim.Height, TextureFormat.RGBA32, mipChain: false);
+                var t = new Texture2D(anim.Width, anim.Height, TextureFormat.RGBA32, mipChain: false, linear: false);
                 t.LoadRawTextureData(anim.Frames[i].Rgba);
                 t.Apply();
                 textures[i] = t;
             }
 
-            Debug.Log($"[MediaSandbox] Spawned animation '{name}' ({anim.Width}×{anim.Height}, {anim.Frames.Length} frames)");
+            Debug.Log($"[MediaSandbox] Spawned animation '{name}' ({anim.Width}×{anim.Height}, " +
+                      $"{anim.Frames.Length} frames{(hasAlpha ? ", alpha" : "")})");
             StartCoroutine(AnimateQuad(mat, textures, anim.Frames, _cts.Token));
         }
 

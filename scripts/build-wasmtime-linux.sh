@@ -38,7 +38,7 @@ cargo build \
     --manifest-path wasmtime-src/Cargo.toml \
     -p wasmtime-c-api \
     --release \
-    --features pulley
+    --features wasmtime/pulley
 
 mkdir -p "$DEST"
 cp wasmtime-src/target/release/libwasmtime.so "$DEST/libwasmtime.so"

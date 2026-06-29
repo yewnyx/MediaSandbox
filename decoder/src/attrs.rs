@@ -1,6 +1,6 @@
 use std::io::Cursor;
 
-// Matches the C# WasmAttrResult struct layout exactly (no padding)
+// Matches the C# MediaDecoderSandbox.AttrResultSize constant exactly (no padding).
 #[repr(C)]
 #[derive(Default, Clone, Copy)]
 pub struct AttrResult {
@@ -14,8 +14,13 @@ pub struct AttrResult {
     pub channel_count: u32,         // offset 36
     pub page_count: u32,            // offset 40  (reserved for future PDF use)
     pub error_code: u32,            // offset 44  (0 = ok)
+    pub flags: u32,                 // offset 48  bit 0 = ALPHA_POSSIBLE
 }
-// Total: 48 bytes
+// Total: 52 bytes
+
+/// Bit 0 of `flags`: the format may carry an alpha channel.
+/// When clear, the decoder guarantees fully-opaque output (JPEG, HDR, BMP).
+const ALPHA_POSSIBLE: u32 = 1;
 
 pub enum MediaKind {
     Image,
@@ -80,19 +85,40 @@ pub fn query(data: &[u8]) -> AttrResult {
 
 fn query_image(data: &[u8]) -> AttrResult {
     use image::ImageReader;
+
+    // Determine orientation-corrected dimensions without a full decode.
+    // Orientations 5–8 rotate 90/270° and therefore swap width and height.
+    let orientation = crate::img::exif_orientation(data);
+    let swaps_dims  = matches!(orientation, 5 | 6 | 7 | 8);
+
+    // JPEG, HDR, and BMP have no alpha channel.
+    let flags = if data.starts_with(b"\xFF\xD8\xFF")
+        || data.starts_with(b"#?RADIANCE")
+        || data.starts_with(b"#?RGBE")
+        || data.starts_with(b"BM")
+    {
+        0
+    } else {
+        ALPHA_POSSIBLE
+    };
+
     match ImageReader::new(Cursor::new(data))
         .with_guessed_format()
         .ok()
         .and_then(|r| r.into_dimensions().ok())
     {
-        Some((w, h)) => AttrResult {
-            media_type: 1,
-            width: w,
-            height: h,
-            frame_count: 1,
-            required_buffer_size: (w as u64) * (h as u64) * 4,
-            ..Default::default()
-        },
+        Some((raw_w, raw_h)) => {
+            let (w, h) = if swaps_dims { (raw_h, raw_w) } else { (raw_w, raw_h) };
+            AttrResult {
+                media_type: 1,
+                width: w,
+                height: h,
+                frame_count: 1,
+                required_buffer_size: (w as u64) * (h as u64) * 4,
+                flags,
+                ..Default::default()
+            }
+        }
         None => AttrResult { media_type: 1, error_code: 2, ..Default::default() },
     }
 }
@@ -108,6 +134,7 @@ fn query_animation(data: &[u8]) -> AttrResult {
                 height: h,
                 frame_count: n,
                 required_buffer_size: header + frame_bytes * (n as u64),
+                flags: ALPHA_POSSIBLE, // GIF and WebP both support alpha
                 ..Default::default()
             }
         }

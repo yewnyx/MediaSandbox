@@ -46,7 +46,7 @@ cargo build \
     -p wasmtime-c-api \
     --release \
     --target "$ARM" \
-    --features pulley
+    --features wasmtime/pulley
 
 # ── Build x86_64 ──────────────────────────────────────────────────────────────
 echo "==> Building wasmtime-c-api for $X86..."
@@ -55,7 +55,7 @@ cargo build \
     -p wasmtime-c-api \
     --release \
     --target "$X86" \
-    --features pulley
+    --features wasmtime/pulley
 
 # ── Lipo into universal binary ────────────────────────────────────────────────
 echo "==> Creating universal dylib..."

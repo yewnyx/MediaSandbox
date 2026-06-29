@@ -39,13 +39,19 @@ pub extern "C" fn query_attributes(data_ptr: u32, data_len: u32, out_ptr: u32) -
 
 // ── Image decode / encode ────────────────────────────────────────────────────
 
-/// Decodes image bytes to RGBA. Host pre-allocates `out_len` = `required_buffer_size` from attrs.
+/// Decodes image bytes to RGBA. Host pre-allocates `out_len` = `target_w * target_h * 4`.
+/// Pass target_w/target_h == 0 to decode at the image's native resolution.
+/// Non-zero target dimensions resize the output (full decode then resize; see img::decode TODO).
 #[no_mangle]
-pub extern "C" fn decode_image(data_ptr: u32, data_len: u32, out_ptr: u32, out_len: u32) -> i32 {
+pub extern "C" fn decode_image(
+    data_ptr: u32, data_len: u32,
+    out_ptr: u32, out_len: u32,
+    target_w: u32, target_h: u32,
+) -> i32 {
     let data = unsafe { std::slice::from_raw_parts(data_ptr as *const u8, data_len as usize) };
     let out = unsafe { std::slice::from_raw_parts_mut(out_ptr as *mut u8, out_len as usize) };
 
-    match img::decode(data) {
+    match img::decode(data, target_w, target_h) {
         Ok(rgba) => {
             let n = rgba.len().min(out.len());
             out[..n].copy_from_slice(&rgba[..n]);
@@ -89,7 +95,8 @@ pub extern "C" fn encode_image(
 // ── Animation decode ─────────────────────────────────────────────────────────
 
 /// Decodes GIF or WebP animation.
-/// Host pre-allocates `out_len` = `required_buffer_size` from attrs.
+/// Host pre-allocates `out_len` = `4 + frame_count*4 + target_w*target_h*4*frame_count`.
+/// Pass target_w/target_h == 0 to decode at native resolution.
 ///
 /// Output layout:
 ///   [frame_count: u32 LE]
@@ -97,15 +104,14 @@ pub extern "C" fn encode_image(
 ///   [frame_0_rgba: W×H×4] … [frame_N-1_rgba: W×H×4]
 #[no_mangle]
 pub extern "C" fn decode_animation(
-    data_ptr: u32,
-    data_len: u32,
-    out_ptr: u32,
-    out_len: u32,
+    data_ptr: u32, data_len: u32,
+    out_ptr: u32, out_len: u32,
+    target_w: u32, target_h: u32,
 ) -> i32 {
     let data = unsafe { std::slice::from_raw_parts(data_ptr as *const u8, data_len as usize) };
     let out = unsafe { std::slice::from_raw_parts_mut(out_ptr as *mut u8, out_len as usize) };
 
-    let frames = match animation::decode(data) {
+    let frames = match animation::decode(data, target_w, target_h) {
         Ok(f) => f,
         Err(_) => return -1,
     };

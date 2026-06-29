@@ -48,7 +48,7 @@ SDKROOT="$(xcrun --sdk iphoneos --show-sdk-path)" \
         -p wasmtime-c-api \
         --release \
         --target "$DEVICE" \
-        --features pulley
+        --features wasmtime/pulley
 
 # ── Build iOS simulator (arm64) ───────────────────────────────────────────────
 echo "==> Building wasmtime-c-api for $SIM..."
@@ -60,7 +60,7 @@ BINDGEN_EXTRA_CLANG_ARGS="--target=arm64-apple-ios-simulator --sysroot=$SDKROOT_
         -p wasmtime-c-api \
         --release \
         --target "$SIM" \
-        --features pulley
+        --features wasmtime/pulley
 
 # ── Verify Pulley symbols ─────────────────────────────────────────────────────
 echo "==> Verifying Pulley symbols in device lib..."

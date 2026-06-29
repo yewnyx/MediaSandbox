@@ -22,8 +22,8 @@ namespace xyz.yewnyx.MediaSandbox
         // ── AttrResult layout must match Rust #[repr(C)] exactly ─────────────
         // Offsets: duration_ms(0) required_buffer_size(8) media_type(16) width(20)
         //          height(24) frame_count(28) sample_rate(32) channel_count(36)
-        //          page_count(40) error_code(44)   Total: 48 bytes
-        private const int AttrResultSize = 48;
+        //          page_count(40) error_code(44) flags(48)   Total: 52 bytes
+        private const int AttrResultSize = 52;
 
         private void Awake()
         {
@@ -195,15 +195,17 @@ namespace xyz.yewnyx.MediaSandbox
             int  frameCount         = memory.ReadInt32(ptr + 28);
             int  sampleRate         = memory.ReadInt32(ptr + 32);
             int  channelCount       = memory.ReadInt32(ptr + 36);
-            // page_count at 40 — reserved
+            // page_count at 40 — reserved for PDF
             int  errorCode          = memory.ReadInt32(ptr + 44);
+            uint flags              = (uint)memory.ReadInt32(ptr + 48);
 
             if (errorCode != 0)
                 throw new Exception($"query_attributes error code: {errorCode}");
 
+            bool canHaveAlpha = (flags & 1u) != 0;
             return new MediaAttributes(
                 (MediaType)mediaType, width, height, frameCount,
-                sampleRate, channelCount, durationMs, requiredBufferSize);
+                sampleRate, channelCount, durationMs, requiredBufferSize, canHaveAlpha);
         }
 
         /// <summary>
@@ -221,28 +223,29 @@ namespace xyz.yewnyx.MediaSandbox
 
                 CheckPathological(attrs, data.Length);
 
+                var (tw, th) = CapDimensions(attrs.Width, attrs.Height);
                 var (store, instance, memory) = CreateInstance();
                 using (store)
                 {
-                    return DecodeImageCore(instance, memory, data.Span, attrs);
+                    return DecodeImageCore(instance, memory, data.Span, tw, th);
                 }
             }, ct);
         }
 
         private static RawImageData DecodeImageCore(
-            Instance instance, Memory memory, ReadOnlySpan<byte> data, MediaAttributes attrs)
+            Instance instance, Memory memory, ReadOnlySpan<byte> data, int targetW, int targetH)
         {
-            int outLen  = (int)attrs.RequiredBufferSize;
+            int outLen  = targetW * targetH * 4;
             int dataPtr = WasmWrite(instance, memory, data);
             int outPtr  = WasmAlloc(instance, outLen);
             try
             {
-                int code = instance.GetFunction<int, int, int, int, int>("decode_image")!
-                    (dataPtr, data.Length, outPtr, outLen);
+                int code = instance.GetFunction<int, int, int, int, int, int, int>("decode_image")!
+                    (dataPtr, data.Length, outPtr, outLen, targetW, targetH);
                 if (code != 0) throw new Exception($"decode_image failed ({code})");
 
                 var rgba = memory.GetSpan(outPtr, outLen).ToArray();
-                return new RawImageData(attrs.Width, attrs.Height, rgba);
+                return new RawImageData(targetW, targetH, rgba);
             }
             finally
             {
@@ -266,27 +269,29 @@ namespace xyz.yewnyx.MediaSandbox
 
                 CheckPathological(attrs, data.Length);
 
+                var (tw, th) = CapDimensions(attrs.Width, attrs.Height);
                 var (store, instance, memory) = CreateInstance();
                 using (store)
                 {
-                    return DecodeAnimationCore(instance, memory, data.Span, attrs);
+                    return DecodeAnimationCore(instance, memory, data.Span, attrs, tw, th);
                 }
             }, ct);
         }
 
         private static AnimatedImageData DecodeAnimationCore(
-            Instance instance, Memory memory, ReadOnlySpan<byte> data, MediaAttributes attrs)
+            Instance instance, Memory memory, ReadOnlySpan<byte> data, MediaAttributes attrs,
+            int targetW, int targetH)
         {
-            int outLen  = (int)attrs.RequiredBufferSize;
+            int outLen  = 4 + attrs.FrameCount * 4 + targetW * targetH * 4 * attrs.FrameCount;
             int dataPtr = WasmWrite(instance, memory, data);
             int outPtr  = WasmAlloc(instance, outLen);
             try
             {
-                int code = instance.GetFunction<int, int, int, int, int>("decode_animation")!
-                    (dataPtr, data.Length, outPtr, outLen);
+                int code = instance.GetFunction<int, int, int, int, int, int, int>("decode_animation")!
+                    (dataPtr, data.Length, outPtr, outLen, targetW, targetH);
                 if (code != 0) throw new Exception($"decode_animation failed ({code})");
 
-                return ParseAnimationOutput(memory.GetSpan(outPtr, outLen), attrs.Width, attrs.Height);
+                return ParseAnimationOutput(memory.GetSpan(outPtr, outLen), targetW, targetH);
             }
             finally
             {
@@ -423,19 +428,19 @@ namespace xyz.yewnyx.MediaSandbox
 
         // ── Pathological guard ────────────────────────────────────────────────
 
+        private static (int w, int h) CapDimensions(int w, int h)
+        {
+            int max = SandboxLimits.MaxDecodeDimension;
+            if (w <= max && h <= max) return (w, h);
+            float scale = Math.Min((float)max / w, (float)max / h);
+            return (Math.Max(1, (int)(w * scale)), Math.Max(1, (int)(h * scale)));
+        }
+
         private static void CheckPathological(MediaAttributes attrs, long fileSize)
         {
             if (fileSize > SandboxLimits.MaxFileSizeBytes)
                 throw new PathologicalMediaException(
                     $"File too large: {fileSize:N0} bytes (limit {SandboxLimits.MaxFileSizeBytes:N0})");
-
-            if (attrs.Type == MediaType.Image || attrs.Type == MediaType.Animation)
-            {
-                if (attrs.Width > SandboxLimits.MaxImageDimension ||
-                    attrs.Height > SandboxLimits.MaxImageDimension)
-                    throw new PathologicalMediaException(
-                        $"Image dimensions {attrs.Width}×{attrs.Height} exceed limit ({SandboxLimits.MaxImageDimension})");
-            }
         }
     }
 }
