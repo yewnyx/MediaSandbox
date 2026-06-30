@@ -41,14 +41,17 @@ pub fn decode(data: &[u8], target_w: u32, target_h: u32, out: &mut [u8]) -> Resu
     Ok(())
 }
 
+pub const ENCODE_FORMAT_PNG:  u32 = 0;
+pub const ENCODE_FORMAT_JPEG: u32 = 1;
+
 pub fn encode(rgba: &[u8], width: u32, height: u32, format: u32) -> Result<Vec<u8>, String> {
     let img = RgbaImage::from_raw(width, height, rgba.to_vec())
         .ok_or_else(|| "invalid image dimensions or buffer size".to_string())?;
     let dyn_img = DynamicImage::ImageRgba8(img);
 
     let fmt = match format {
-        0 => ImageFormat::Png,
-        1 => ImageFormat::Jpeg,
+        ENCODE_FORMAT_PNG  => ImageFormat::Png,
+        ENCODE_FORMAT_JPEG => ImageFormat::Jpeg,
         _ => return Err(format!("unknown image format code: {format}")),
     };
 

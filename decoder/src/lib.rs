@@ -4,6 +4,10 @@ mod audio;
 mod img;
 mod meta;
 
+// Re-exported for the gen_cs codegen binary — not part of the WASM ABI.
+pub use attrs::{AttrResult, MediaKind, ALPHA_POSSIBLE};
+pub use img::{ENCODE_FORMAT_PNG, ENCODE_FORMAT_JPEG};
+
 use std::alloc::Layout;
 
 // ── Memory management ────────────────────────────────────────────────────────
@@ -28,8 +32,8 @@ pub extern "C" fn dealloc(ptr: u32, size: u32) {
 
 // ── Attribute query ──────────────────────────────────────────────────────────
 
-/// Writes an `AttrResult` (48 bytes) to `out_ptr`.
-/// Host must `alloc(48)` before calling and `dealloc(out_ptr, 48)` after reading.
+/// Writes an `AttrResult` (56 bytes) to `out_ptr`.
+/// Host must `alloc(56)` before calling and `dealloc(out_ptr, 56)` after reading.
 #[no_mangle]
 pub extern "C" fn query_attributes(data_ptr: u32, data_len: u32, out_ptr: u32) -> i32 {
     let data = unsafe { std::slice::from_raw_parts(data_ptr as *const u8, data_len as usize) };
