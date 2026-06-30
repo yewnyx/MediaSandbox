@@ -15,6 +15,8 @@ symphonia = { version = "0.5", default-features = false, features = [
     "mp3", "flac", "ogg", "vorbis", "wav", "aiff", "pcm"
 ] }
 kamadak-exif = "0.5"
+zune-jpeg = "0.5"
+zune-core = "0.5"
 
 [profile.release]
 opt-level = "z"

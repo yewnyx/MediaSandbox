@@ -2,6 +2,7 @@ mod animation;
 mod attrs;
 mod audio;
 mod img;
+mod meta;
 
 use std::alloc::Layout;
 
@@ -191,6 +192,32 @@ pub extern "C" fn animation_close(handle: u32) {
     if handle != 0 {
         unsafe { drop(Box::from_raw(handle as *mut animation::AnimHandle)) };
     }
+}
+
+// ── Metadata query ────────────────────────────────────────────────────────────
+
+/// Queries EXIF and XMP metadata from an image file.
+/// Writes a UTF-8 JSON string into WASM memory; host reads *out_ptr_ptr and *out_len_ptr,
+/// copies the bytes, then calls dealloc(*out_ptr_ptr, *out_len_ptr).
+/// Always succeeds (returns 0) even when no metadata is found (result is "{}").
+#[no_mangle]
+pub extern "C" fn query_metadata(
+    data_ptr: u32,
+    data_len: u32,
+    out_ptr_ptr: u32,
+    out_len_ptr: u32,
+) -> i32 {
+    let data = unsafe { std::slice::from_raw_parts(data_ptr as *const u8, data_len as usize) };
+    let json  = meta::query_metadata(data);
+    let bytes = json.into_bytes();
+    let len   = bytes.len() as u32;
+    let dst   = alloc(len);
+    unsafe {
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), dst as *mut u8, len as usize);
+        *(out_ptr_ptr as *mut u32) = dst;
+        *(out_len_ptr as *mut u32) = len;
+    }
+    0
 }
 
 // ── Audio decode ─────────────────────────────────────────────────────────────

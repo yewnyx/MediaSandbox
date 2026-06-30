@@ -2,8 +2,9 @@ use std::io::Cursor;
 use image::{imageops, DynamicImage, ImageFormat, ImageReader, RgbaImage};
 
 // TODO(perf): decode at target size without a full-resolution intermediate.
-// JPEG supports DCT scaling (1/2, 1/4, 1/8) via zune-jpeg; PNG can be
-// downsampled scanline-by-scanline. Each format needs its own fast path.
+// zune-jpeg uses 1/8, 1/4, 1/2 IDCT variants internally but does not expose
+// a scale-factor option in its 0.5 public API. PNG filter dependencies require
+// every row to be decompressed regardless. Both remain full-resolution for now.
 /// Decodes `data` to RGBA, applying EXIF orientation and optional resize,
 /// and writes the result bottom-to-top directly into `out` — no intermediate
 /// flip buffer or Vec allocation.
