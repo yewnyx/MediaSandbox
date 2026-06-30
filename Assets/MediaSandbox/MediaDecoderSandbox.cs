@@ -27,23 +27,36 @@ namespace xyz.yewnyx.MediaSandbox
         //          page_count(40) error_code(44) flags(48)   Total: 52 bytes
         private const int AttrResultSize = 52;
 
+        // Pulley is Wasmtime's portable bytecode interpreter — required on platforms
+        // where JIT is prohibited (iOS). Activated by setting target to "pulley64".
+        // On iOS this is always enabled regardless of the value below.
+        // The native wasmtime library must be built with the `pulley` cargo feature;
+        // see .github/workflows/build.yml and scripts/build-wasmtime-*.sh.
+        private const bool UsePulley = true;
+
         private void Awake()
         {
-#if !MEDIA_SANDBOX_NO_PULLEY
-            // Pulley is Wasmtime's portable bytecode interpreter — required on platforms
-            // where JIT is prohibited (iOS). Activated by setting target to "pulley64".
-            // Define MEDIA_SANDBOX_NO_PULLEY to fall back to Cranelift JIT instead.
-            //
-            // The native wasmtime library must be built with the `pulley` cargo feature.
-            // See .github/workflows/build.yml and scripts/build-wasmtime-*.sh.
+#if UNITY_IOS
+            // JIT is prohibited on iOS — Pulley is mandatory.
             _engine = new Engine(MakePulleyConfig());
             if (!_engine.IsPulleyInterpreter)
                 throw new InvalidOperationException(
                     "[MediaSandbox] Expected Pulley interpreter but Wasmtime is using Cranelift. " +
-                    "Ensure the native wasmtime library was built with --features pulley, " +
-                    "or define MEDIA_SANDBOX_NO_PULLEY to use Cranelift explicitly.");
+                    "Ensure the native wasmtime library was built with --features pulley.");
 #else
-            _engine = new Engine();
+            if (UsePulley)
+            {
+                _engine = new Engine(MakePulleyConfig());
+                if (!_engine.IsPulleyInterpreter)
+                    throw new InvalidOperationException(
+                        "[MediaSandbox] Expected Pulley interpreter but Wasmtime is using Cranelift. " +
+                        "Ensure the native wasmtime library was built with --features pulley, " +
+                        "or set UsePulley = false to use Cranelift explicitly.");
+            }
+            else
+            {
+                _engine = new Engine();
+            }
 #endif
             _linker = new Linker(_engine);
             _linker.DefineWasi();

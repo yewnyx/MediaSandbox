@@ -151,14 +151,14 @@ pub extern "C" fn animation_open(
     data_ptr: u32, data_len: u32,
     target_w: u32, target_h: u32,
 ) -> u32 {
-    let data = unsafe {
-        std::slice::from_raw_parts(data_ptr as *const u8, data_len as usize).to_vec()
-    };
-    // Free the caller's buffer — animation_open always consumes data_ptr.
-    dealloc(data_ptr, data_len);
-    match animation::open(data, target_w, target_h) {
+    // Ownership of data_ptr transfers to animation::open — it stores the pointer
+    // in AnimHandle and frees it on drop. On error we free it here instead.
+    match animation::open(data_ptr, data_len, target_w, target_h) {
         Ok(handle) => Box::into_raw(handle) as u32,
-        Err(_) => 0,
+        Err(_) => {
+            dealloc(data_ptr, data_len);
+            0
+        }
     }
 }
 

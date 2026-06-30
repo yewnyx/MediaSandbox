@@ -14,6 +14,8 @@ namespace xyz.yewnyx.MediaSandbox
     [RequireComponent(typeof(MediaDecoderSandbox))]
     public sealed class DragDropMediaSpawner : MonoBehaviour
     {
+        // Set to true to log a line after every decoded frame instead of every 10%.
+        private const bool VerboseDecodeLogging = false;
         private MediaDecoderSandbox _sandbox;
         private CancellationTokenSource _cts;
 
@@ -108,10 +110,18 @@ namespace xyz.yewnyx.MediaSandbox
 
             int lastReportedPct = -1;
             var progress = new Progress<float>(f => {
-                int pct = (int)(f * 100f / 10) * 10; // floor to nearest 10%
-                if (pct <= lastReportedPct) return;
-                lastReportedPct = pct;
-                Debug.Log($"[MediaSandbox] Decoding '{name}': {pct}%");
+                if (VerboseDecodeLogging)
+                {
+                    int frame = Mathf.RoundToInt(f * attrs.FrameCount);
+                    Debug.Log($"[MediaSandbox] '{name}': frame {frame}/{attrs.FrameCount}");
+                }
+                else
+                {
+                    int pct = (int)(f * 100f / 10) * 10; // floor to nearest 10%
+                    if (pct <= lastReportedPct) return;
+                    lastReportedPct = pct;
+                    Debug.Log($"[MediaSandbox] Decoding '{name}': {pct}%");
+                }
             });
 
             AnimatedImageData anim;
