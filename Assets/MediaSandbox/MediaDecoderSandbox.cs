@@ -29,7 +29,7 @@ namespace xyz.yewnyx.MediaSandbox
         // On iOS this is always enabled regardless of the value below.
         // The native wasmtime library must be built with the `pulley` cargo feature;
         // see .github/workflows/build.yml and scripts/build-wasmtime-*.sh.
-        private const bool UsePulley = true;
+        private const bool UsePulley = false;
 
         private void Awake()
         {
