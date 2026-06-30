@@ -2,6 +2,11 @@ mod animation;
 mod attrs;
 mod audio;
 mod img;
+mod meta;
+
+// Re-exported for the gen_cs codegen binary — not part of the WASM ABI.
+pub use attrs::{AttrResult, MediaKind, ALPHA_POSSIBLE};
+pub use img::{ENCODE_FORMAT_PNG, ENCODE_FORMAT_JPEG};
 
 use std::alloc::Layout;
 
@@ -27,8 +32,8 @@ pub extern "C" fn dealloc(ptr: u32, size: u32) {
 
 // ── Attribute query ──────────────────────────────────────────────────────────
 
-/// Writes an `AttrResult` (48 bytes) to `out_ptr`.
-/// Host must `alloc(48)` before calling and `dealloc(out_ptr, 48)` after reading.
+/// Writes an `AttrResult` (56 bytes) to `out_ptr`.
+/// Host must `alloc(56)` before calling and `dealloc(out_ptr, 56)` after reading.
 #[no_mangle]
 pub extern "C" fn query_attributes(data_ptr: u32, data_len: u32, out_ptr: u32) -> i32 {
     let data = unsafe { std::slice::from_raw_parts(data_ptr as *const u8, data_len as usize) };
@@ -51,12 +56,8 @@ pub extern "C" fn decode_image(
     let data = unsafe { std::slice::from_raw_parts(data_ptr as *const u8, data_len as usize) };
     let out = unsafe { std::slice::from_raw_parts_mut(out_ptr as *mut u8, out_len as usize) };
 
-    match img::decode(data, target_w, target_h) {
-        Ok(rgba) => {
-            let n = rgba.len().min(out.len());
-            out[..n].copy_from_slice(&rgba[..n]);
-            0
-        }
+    match img::decode(data, target_w, target_h, out) {
+        Ok(()) => 0,
         Err(_) => -1,
     }
 }
@@ -92,51 +93,126 @@ pub extern "C" fn encode_image(
     }
 }
 
-// ── Animation decode ─────────────────────────────────────────────────────────
+// ── Animation streaming decode ────────────────────────────────────────────────
 
-/// Decodes GIF or WebP animation.
-/// Host pre-allocates `out_len` = `4 + frame_count*4 + target_w*target_h*4*frame_count`.
-/// Pass target_w/target_h == 0 to decode at native resolution.
-///
-/// Output layout:
-///   [frame_count: u32 LE]
-///   [delay_ms_0: u32 LE] … [delay_ms_N-1: u32 LE]
-///   [frame_0_rgba: W×H×4] … [frame_N-1_rgba: W×H×4]
+/// Opens a streaming animation decoder. Consumes data_ptr — the WASM module takes its
+/// own copy and immediately frees the caller's buffer via dealloc; the host must NOT
+/// call dealloc(data_ptr) after this returns.
+/// Returns a non-zero handle on success, 0 on error (buffer is still freed on error).
+/// Call animation_next_frame repeatedly, then animation_close to free the handle.
 #[no_mangle]
-pub extern "C" fn decode_animation(
+pub extern "C" fn animation_open(
     data_ptr: u32, data_len: u32,
-    out_ptr: u32, out_len: u32,
     target_w: u32, target_h: u32,
+) -> u32 {
+    // Ownership of data_ptr transfers to animation::open — it stores the pointer
+    // in AnimHandle and frees it on drop. On error we free it here instead.
+    match animation::open(data_ptr, data_len, target_w, target_h) {
+        Ok(handle) => Box::into_raw(handle) as u32,
+        Err(_) => {
+            dealloc(data_ptr, data_len);
+            0
+        }
+    }
+}
+
+/// Decodes the next frame into host-pre-allocated buffers.
+///   out_delay_ms_ptr : host alloc(4)                       — receives frame delay in ms
+///   out_rgba_ptr     : host alloc(target_w * target_h * 4) — receives RGBA bytes (flipped)
+///   out_rgba_len     : byte length of the rgba buffer
+/// Returns 0 = frame written, 1 = animation exhausted (done), -1 = error.
+#[no_mangle]
+pub extern "C" fn animation_next_frame(
+    handle: u32,
+    out_delay_ms_ptr: u32,
+    out_rgba_ptr: u32,
+    out_rgba_len: u32,
+) -> i32 {
+    if handle == 0 { return -1; }
+    let handle_ref = unsafe { &mut *(handle as *mut animation::AnimHandle) };
+    let out_rgba = unsafe {
+        std::slice::from_raw_parts_mut(out_rgba_ptr as *mut u8, out_rgba_len as usize)
+    };
+    match animation::next_frame(handle_ref, out_rgba) {
+        None => 1,
+        Some(Err(_)) => -1,
+        Some(Ok(delay_ms)) => {
+            unsafe { *(out_delay_ms_ptr as *mut u32) = delay_ms; }
+            0
+        }
+    }
+}
+
+/// Frees a handle returned by animation_open.
+#[no_mangle]
+pub extern "C" fn animation_close(handle: u32) {
+    if handle != 0 {
+        unsafe { drop(Box::from_raw(handle as *mut animation::AnimHandle)) };
+    }
+}
+
+// ── Metadata query ────────────────────────────────────────────────────────────
+
+/// Queries EXIF and XMP metadata from an image file.
+/// Writes a UTF-8 JSON string into WASM memory; host reads *out_ptr_ptr and *out_len_ptr,
+/// copies the bytes, then calls dealloc(*out_ptr_ptr, *out_len_ptr).
+/// Always succeeds (returns 0) even when no metadata is found (result is "{}").
+#[no_mangle]
+pub extern "C" fn query_metadata(
+    data_ptr: u32,
+    data_len: u32,
+    out_ptr_ptr: u32,
+    out_len_ptr: u32,
 ) -> i32 {
     let data = unsafe { std::slice::from_raw_parts(data_ptr as *const u8, data_len as usize) };
-    let out = unsafe { std::slice::from_raw_parts_mut(out_ptr as *mut u8, out_len as usize) };
-
-    let frames = match animation::decode(data, target_w, target_h) {
-        Ok(f) => f,
-        Err(_) => return -1,
-    };
-
-    let n = frames.len() as u32;
-    let mut offset = 0usize;
-
-    if offset + 4 > out.len() { return -2; }
-    out[offset..offset + 4].copy_from_slice(&n.to_le_bytes());
-    offset += 4;
-
-    for (delay_ms, _) in &frames {
-        if offset + 4 > out.len() { return -2; }
-        out[offset..offset + 4].copy_from_slice(&delay_ms.to_le_bytes());
-        offset += 4;
+    let json  = meta::query_metadata(data);
+    let bytes = json.into_bytes();
+    let len   = bytes.len() as u32;
+    let dst   = alloc(len);
+    unsafe {
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), dst as *mut u8, len as usize);
+        *(out_ptr_ptr as *mut u32) = dst;
+        *(out_len_ptr as *mut u32) = len;
     }
-
-    for (_, img) in &frames {
-        let raw = img.as_raw();
-        if offset + raw.len() > out.len() { return -2; }
-        out[offset..offset + raw.len()].copy_from_slice(raw);
-        offset += raw.len();
-    }
-
     0
+}
+
+// ── Metadata stripping ────────────────────────────────────────────────────────
+
+/// Strips EXIF, XMP, and associated metadata from a JPEG, PNG, or WebP file
+/// without re-encoding pixel data.
+///
+/// Returns 0 on success — WASM allocates the stripped bytes; host reads *out_ptr_ptr
+/// and *out_len_ptr, copies the data, then calls dealloc(*out_ptr_ptr, *out_len_ptr).
+/// Returns 1 if the format is not supported for in-place stripping — host uses the
+/// original data as-is; out_ptr_ptr and out_len_ptr are set to 0 and must NOT be dealloc'd.
+#[no_mangle]
+pub extern "C" fn strip_metadata(
+    data_ptr: u32,
+    data_len: u32,
+    out_ptr_ptr: u32,
+    out_len_ptr: u32,
+) -> i32 {
+    let data = unsafe { std::slice::from_raw_parts(data_ptr as *const u8, data_len as usize) };
+    match meta::strip_metadata(data) {
+        Some(stripped) => {
+            let len = stripped.len() as u32;
+            let dst = alloc(len);
+            unsafe {
+                std::ptr::copy_nonoverlapping(stripped.as_ptr(), dst as *mut u8, len as usize);
+                *(out_ptr_ptr as *mut u32) = dst;
+                *(out_len_ptr as *mut u32) = len;
+            }
+            0
+        }
+        None => {
+            unsafe {
+                *(out_ptr_ptr as *mut u32) = 0;
+                *(out_len_ptr as *mut u32) = 0;
+            }
+            1
+        }
+    }
 }
 
 // ── Audio decode ─────────────────────────────────────────────────────────────

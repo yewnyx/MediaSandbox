@@ -2,7 +2,7 @@
 
 # MediaSandbox
 
-A Unity Editor tool for drag-and-dropping media files (images, animations, audio) into play mode and seeing them rendered/played immediately. Decoding runs inside a WebAssembly sandbox so malformed or malicious files can't reach native code.
+A Unity Editor tool for drag-and-dropping media files — images, animations, audio — into play mode and seeing them rendered or played immediately. Decoding runs inside a WebAssembly sandbox so malformed or malicious files can't reach native code. Each decode call runs in its own Wasmtime instance with isolated linear memory; a compromised decoder can't escape it. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design rationale and technical details.
 
 ## What it does
 
@@ -13,7 +13,8 @@ A Unity Editor tool for drag-and-dropping media files (images, animations, audio
   - **Animations** (GIF, animated WebP) → Quad with a coroutine-driven frame loop
   - **Audio** (MP3, FLAC, OGG/Vorbis, WAV, AIFF) → `AudioSource` that starts playing
   - **Video** → detected and logged; spawning not yet implemented
-- Rejects files over 512 MB before decode; images larger than 8192 px in either dimension are scaled down to fit (full decode then resize — per-format fast-path is planned, see below)
+- Rejects files over 512 MB before decode; images larger than 8192 px in either dimension are scaled down to fit (full decode then resize — see Future Work)
+- Supports EXIF/XMP metadata query (`query_metadata`) and in-place metadata stripping without re-encoding (`strip_metadata`) for JPEG, PNG, and WebP
 
 ## Getting Started
 
@@ -45,6 +46,8 @@ pwsh scripts/build-wasm.ps1 -Release # smallest output
 pwsh scripts/build-wasm.ps1 -Debug   # unoptimised
 ```
 
+The build script also runs `gen_cs` (a host Rust binary in the same crate) to regenerate `Assets/MediaSandbox/Generated/SandboxLayout.g.cs` — a C# file containing exact struct offsets and enum discriminants derived from the Rust types. Commit it alongside the WASM binary.
+
 Output lands at `Assets/StreamingAssets/mediasandbox/decoder.wasm`. You need the Rust toolchain with the WASM target:
 
 ```
@@ -60,27 +63,32 @@ Unity Editor (C#)
   InitializeMediaSandbox      — [InitializeOnLoad], wires play-mode hooks
   MediaDropWindow             — EditorWindow that receives drag-drop events
   DragDropMediaSpawner        — reads file bytes, dispatches to sandbox, spawns Unity objects
-  MediaDecoderSandbox         — owns the Wasmtime Engine/Linker/Module (shared); 
+  MediaDecoderSandbox         — owns the Wasmtime Engine/Linker/Module (shared);
                                 creates one Store+Instance per decode call for concurrency
 
 WASM boundary (Wasmtime .NET SDK + wasmtime.dll)
   decoder.wasm                — compiled from decoder/ Rust crate
     query_attributes          — sniff format, return dimensions/duration/buffer sizes
+    query_metadata            — → JSON with EXIF fields and raw XMP packet
+    strip_metadata            — removes EXIF/XMP in-place (JPEG, PNG, WebP; no re-encode)
     decode_image              — → raw RGBA bytes
-    decode_animation          — → frame count, per-frame delay + RGBA
+    animation_open/next_frame/close — streaming per-frame animation decode
     decode_audio              — → interleaved f32 PCM, sample rate, channel count
     encode_image              — → PNG or JPEG bytes (unused by spawner, available for export)
+    alloc / dealloc           — WASM-side memory management, called by the host
 
 Rust crate (decoder/)
   image crate                 — PNG, JPEG, BMP, TIFF, WebP, HDR, QOI, GIF
   symphonia                   — MP3, FLAC, OGG/Vorbis, WAV, AIFF
+  kamadak-exif                — EXIF field extraction and JPEG orientation
+  zune-jpeg                   — JPEG XMP extraction (header-only, no pixel decode)
 ```
 
-Memory is managed explicitly: the host calls `alloc`/`dealloc` exports on the WASM instance. Each decode gets its own `Store`, so concurrent calls don't share state.
+Memory is managed explicitly: the host calls `alloc`/`dealloc` exports on the WASM instance. Each decode gets its own `Store` and `Instance` with isolated linear memory, so concurrent calls share nothing. See [ARCHITECTURE.md](ARCHITECTURE.md) for detail on threading, the memory protocol, layout sync, and the choice of WASM over alternatives.
 
 ## Scope
 
-This is a sandbox tool for inspecting and previewing media inside the Unity Editor. It is not intended for shipping in a player build, production asset pipelines, or any context requiring stability guarantees. The WASM boundary provides a degree of isolation from malformed files but has not been audited for security.
+This is a sandbox tool for inspecting and previewing media inside the Unity Editor. It is not intended for shipping in a player build, production asset pipelines, or any context requiring stability guarantees. The WASM boundary provides a meaningful degree of isolation from malformed files but has not been audited for security.
 
 Notable gaps:
 
@@ -88,25 +96,27 @@ Notable gaps:
 - No UI for configuring `SandboxLimits` at runtime
 - Texture upload, AudioClip creation, and quad spawning are minimal/unpolished
 - Error handling surfaces to the Console only — no in-editor UI feedback
+- `strip_metadata` does not support TIFF (IFD structure is interwoven with image data; use decode→`encode_image` round-trip instead)
 
 ## Future Work
 
 Items that are known, understood, and explicitly deferred:
 
 **Decode performance**
-- *Per-format fast-path resize* — large images are currently decoded at full resolution then scaled down. JPEG supports DCT-scale hints (1/2, 1/4, 1/8 natively); PNG can be downsampled scanline-by-scanline. Each format needs its own path to avoid the full-resolution intermediate. See `decoder/src/img.rs`.
+- *Per-format target-sized decode* — large images are decoded at full resolution then scaled down. `zune-jpeg` uses 1/8, 1/4, 1/2 IDCT variants internally but does not expose a scale-factor in its 0.5 public API; PNG filter dependencies require every row regardless. Both remain full-resolution for now. See `decoder/src/img.rs`.
 
-**Color and format fidelity**
-- *HDR output* — `.hdr` (Radiance) files are currently tone-mapped to 8 bpc on the Rust side. A proper path would output `f32` RGBA and create a `TextureFormat.RGBAFloat` texture. Relevant in linear-space VR projects where HDR is used for environment/lighting.
-- *ICC color profiles* — the `image` crate ignores embedded ICC profiles. Most content is sRGB and will look correct; AdobeRGB or DCI-P3 tagged files will appear slightly desaturated. Full support requires `lcms2` bindings.
-- *16/32 bpc decode* — PNG and TIFF can carry 16-bit channels. Currently downsampled to 8 bpc. Needed for print-originated assets.
+**Runtime**
+- *AOT-compiled module* — Wasmtime supports ahead-of-time compilation via `Engine.PrecompileModule()` → `Module.Deserialize()`. Shipping a pre-compiled `.cwasm` file would eliminate the Cranelift JIT stall on first load (desktop) and the Pulley interpreter overhead on platforms where JIT is prohibited (iOS).
 
-**EXIF / metadata**
-- *EXIF stripping for network transmission* — when transmitting the original compressed file bytes over a network, EXIF metadata (including GPS location) should be stripped. The current decode→`encode_image` round-trip already produces a metadata-free file; a dedicated strip-without-recompression function is the missing piece.
+  Platform matrix once implemented:
+  - iOS: AOT `.cwasm` (preferred) or Pulley interpreter fallback
+  - Desktop/Android: JIT Cranelift (current default), AOT `.cwasm`, or Pulley interpreter
+
+  The `UsePulley` const in `MediaDecoderSandbox` would expand to a three-way `enum ExecutionMode { Jit, Aot, Interpreter }`, and `Awake()` would probe for a `.cwasm` sidecar before falling back. AOT compilation would be a build-script step in `build-wasm.ps1`. Security consideration: a stale AOT module that predates a patched WASM binary needs an explicit policy for when to prefer fresh interpretation over a cached `.cwasm`.
 
 **Format support**
 - *PSD* — flatten or expose layers. Per-layer blend modes, masks, and 16/32 bpc channels are non-trivial. Flattened RGBA is the natural starting point.
-- *PDF* — vector-to-raster at a caller-supplied DPI, multi-page navigation (the `page_count` field in `AttrResult` is already reserved), CMYK colorspace conversion.
+- *PDF* — vector-to-raster at a caller-supplied DPI, multi-page navigation (the `page_count` field in `AttrResult` is already reserved), CMYK colorspace conversion. `pdfium-render` (Google PDFium) is the highest-fidelity option; the tradeoff is ~10–20 MB added to the WASM binary. The streaming per-page interface is designed: `pdf_open` / `pdf_page_size` / `pdf_render_page` / `pdf_close`, mirroring the animation streaming API, with a C# `PdfDocument` wrapper.
 
 ## License
 

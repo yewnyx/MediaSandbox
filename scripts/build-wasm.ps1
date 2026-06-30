@@ -31,8 +31,22 @@ if ($Debug) {
 Write-Host '==> Adding WASM target...'
 rustup target add $Target
 
-Write-Host "==> Building decoder ($Profile)..."
-cargo build --manifest-path decoder/Cargo.toml --target $Target @CargoArgs
+# Build gen_cs for the host and regenerate SandboxLayout.g.cs.
+# This must run before the WASM build so C# gets fresh layout constants on every rebuild.
+Write-Host '==> Building gen_cs (host)...'
+cargo build --manifest-path decoder/Cargo.toml --bin gen_cs 2>&1 | Write-Host
+if ($LASTEXITCODE -ne 0) { Write-Error 'gen_cs build failed'; exit $LASTEXITCODE }
+
+$GenExe  = "decoder\target\debug\gen_cs.exe"
+$GenDest = 'Assets\MediaSandbox\Generated'
+New-Item -ItemType Directory -Force $GenDest | Out-Null
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+& $GenExe | Set-Content "$GenDest\SandboxLayout.g.cs" -Encoding UTF8
+if ($LASTEXITCODE -ne 0) { Write-Error 'gen_cs execution failed'; exit $LASTEXITCODE }
+Write-Host "==> Generated → $GenDest\SandboxLayout.g.cs"
+
+Write-Host "==> Building decoder WASM ($Profile)..."
+cargo build --manifest-path decoder/Cargo.toml --target $Target --lib @CargoArgs
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $Src  = "decoder\target\$Target\$Profile\decoder.wasm"

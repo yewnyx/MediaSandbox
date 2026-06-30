@@ -2,9 +2,13 @@ use std::io::Cursor;
 use image::{imageops, DynamicImage, ImageFormat, ImageReader, RgbaImage};
 
 // TODO(perf): decode at target size without a full-resolution intermediate.
-// JPEG supports DCT scaling (1/2, 1/4, 1/8) via zune-jpeg; PNG can be
-// downsampled scanline-by-scanline. Each format needs its own fast path.
-pub fn decode(data: &[u8], target_w: u32, target_h: u32) -> Result<Vec<u8>, String> {
+// zune-jpeg uses 1/8, 1/4, 1/2 IDCT variants internally but does not expose
+// a scale-factor option in its 0.5 public API. PNG filter dependencies require
+// every row to be decompressed regardless. Both remain full-resolution for now.
+/// Decodes `data` to RGBA, applying EXIF orientation and optional resize,
+/// and writes the result bottom-to-top directly into `out` — no intermediate
+/// flip buffer or Vec allocation.
+pub fn decode(data: &[u8], target_w: u32, target_h: u32, out: &mut [u8]) -> Result<(), String> {
     let orientation = exif_orientation(data);
 
     let img = ImageReader::new(Cursor::new(data))
@@ -23,10 +27,22 @@ pub fn decode(data: &[u8], target_w: u32, target_h: u32) -> Result<Vec<u8>, Stri
         img
     };
 
-    // Unity's LoadRawTextureData expects bottom-to-top row order (OpenGL convention).
-    // The image crate returns top-to-bottom, so flip unconditionally.
-    Ok(img.flipv().into_rgba8().into_raw())
+    // Flip rows directly into the output (OpenGL bottom-to-top convention).
+    let img = img.into_rgba8();
+    let w = img.width() as usize;
+    let h = img.height() as usize;
+    let row_bytes = w * 4;
+    let src = img.as_raw();
+    for row in 0..h {
+        let src_row = &src[(h - 1 - row) * row_bytes..(h - row) * row_bytes];
+        out[row * row_bytes..(row + 1) * row_bytes].copy_from_slice(src_row);
+    }
+
+    Ok(())
 }
+
+pub const ENCODE_FORMAT_PNG:  u32 = 0;
+pub const ENCODE_FORMAT_JPEG: u32 = 1;
 
 pub fn encode(rgba: &[u8], width: u32, height: u32, format: u32) -> Result<Vec<u8>, String> {
     let img = RgbaImage::from_raw(width, height, rgba.to_vec())
@@ -34,8 +50,8 @@ pub fn encode(rgba: &[u8], width: u32, height: u32, format: u32) -> Result<Vec<u
     let dyn_img = DynamicImage::ImageRgba8(img);
 
     let fmt = match format {
-        0 => ImageFormat::Png,
-        1 => ImageFormat::Jpeg,
+        ENCODE_FORMAT_PNG  => ImageFormat::Png,
+        ENCODE_FORMAT_JPEG => ImageFormat::Jpeg,
         _ => return Err(format!("unknown image format code: {format}")),
     };
 

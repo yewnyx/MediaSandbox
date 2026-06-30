@@ -16,17 +16,18 @@ pub struct AttrResult {
     pub error_code: u32,            // offset 44  (0 = ok)
     pub flags: u32,                 // offset 48  bit 0 = ALPHA_POSSIBLE
 }
-// Total: 52 bytes
+// Total: 56 bytes (52 bytes of fields + 4 bytes tail-padding for 8-byte struct alignment)
 
 /// Bit 0 of `flags`: the format may carry an alpha channel.
 /// When clear, the decoder guarantees fully-opaque output (JPEG, HDR, BMP).
-const ALPHA_POSSIBLE: u32 = 1;
+pub const ALPHA_POSSIBLE: u32 = 1;
 
+#[repr(u32)]
 pub enum MediaKind {
-    Image,
-    Animation,
-    Audio,
-    Unknown,
+    Unknown   = 0,
+    Image     = 1,
+    Animation = 2,
+    Audio     = 3,
 }
 
 pub fn sniff(data: &[u8]) -> MediaKind {
@@ -110,7 +111,7 @@ fn query_image(data: &[u8]) -> AttrResult {
         Some((raw_w, raw_h)) => {
             let (w, h) = if swaps_dims { (raw_h, raw_w) } else { (raw_w, raw_h) };
             AttrResult {
-                media_type: 1,
+                media_type: MediaKind::Image as u32,
                 width: w,
                 height: h,
                 frame_count: 1,
@@ -119,7 +120,7 @@ fn query_image(data: &[u8]) -> AttrResult {
                 ..Default::default()
             }
         }
-        None => AttrResult { media_type: 1, error_code: 2, ..Default::default() },
+        None => AttrResult { media_type: MediaKind::Image as u32, error_code: 2, ..Default::default() },
     }
 }
 
@@ -129,7 +130,7 @@ fn query_animation(data: &[u8]) -> AttrResult {
             let frame_bytes = (w as u64) * (h as u64) * 4;
             let header = 4 + (n as u64) * 4; // frame_count u32 + N×delay_ms u32
             AttrResult {
-                media_type: 2,
+                media_type: MediaKind::Animation as u32,
                 width: w,
                 height: h,
                 frame_count: n,
@@ -138,20 +139,20 @@ fn query_animation(data: &[u8]) -> AttrResult {
                 ..Default::default()
             }
         }
-        Err(_) => AttrResult { media_type: 2, error_code: 3, ..Default::default() },
+        Err(_) => AttrResult { media_type: MediaKind::Animation as u32, error_code: 3, ..Default::default() },
     }
 }
 
 fn query_audio(data: &[u8]) -> AttrResult {
     match crate::audio::query(data) {
         Ok((sample_rate, channel_count, duration_ms)) => AttrResult {
-            media_type: 3,
+            media_type: MediaKind::Audio as u32,
             sample_rate,
             channel_count,
             duration_ms,
             // required_buffer_size intentionally left 0: audio uses WASM-internal alloc
             ..Default::default()
         },
-        Err(_) => AttrResult { media_type: 3, error_code: 4, ..Default::default() },
+        Err(_) => AttrResult { media_type: MediaKind::Audio as u32, error_code: 4, ..Default::default() },
     }
 }
