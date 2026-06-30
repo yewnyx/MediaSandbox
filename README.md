@@ -2,19 +2,22 @@
 
 # MediaSandbox
 
-A Unity Editor tool for drag-and-dropping media files — images, animations, audio — into play mode and seeing them rendered or played immediately. Decoding runs inside a WebAssembly sandbox so malformed or malicious files can't reach native code. Each decode call runs in its own Wasmtime instance with isolated linear memory; a compromised decoder can't escape it. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design rationale and technical details.
+A Unity package for decoding images, animations, and audio inside a WebAssembly sandbox so malformed or malicious files can't reach native code. Each decode call runs in its own Wasmtime instance with isolated linear memory; a compromised decoder can't escape it. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design rationale and technical details.
+
+This repository also includes an editor sandbox (`Assets/MediaSandbox/`) that demonstrates the package: drag media files into play mode and see them rendered or played immediately.
 
 ## What it does
 
-- Opens a **Media Drop** editor window when you enter play mode
-- Accepts dragged files and reads their type without trusting the file extension — format detection happens inside WASM
-- Decodes the file off the main thread and spawns the result back on it:
-  - **Images** (PNG, JPEG, BMP, TIFF, WebP, HDR, QOI) → textured Quad
-  - **Animations** (GIF, animated WebP) → Quad with a coroutine-driven frame loop
-  - **Audio** (MP3, FLAC, OGG/Vorbis, WAV, AIFF) → `AudioSource` that starts playing
-  - **Video** → detected and logged; spawning not yet implemented
-- Rejects files over 512 MB before decode; images larger than 8192 px in either dimension are scaled down to fit (full decode then resize — see Future Work)
-- Supports EXIF/XMP metadata query (`query_metadata`) and in-place metadata stripping without re-encoding (`strip_metadata`) for JPEG, PNG, and WebP
+The package exposes an async C# API for decoding media inside an isolated WASM sandbox:
+
+- **Format sniffing** — `QueryAttributesAsync` reads only the file header to identify type, dimensions, frame count, and exact output buffer size without trusting the file extension
+- **Image decode** — `DecodeImageAsync` → raw RGBA bytes; supports PNG, JPEG, BMP, TIFF, WebP, HDR, QOI
+- **Animation decode** — `DecodeAnimationAsync` → per-frame RGBA + delay; streaming, with progress callbacks; supports GIF and animated WebP
+- **Audio decode** — `DecodeAudioAsync` → interleaved f32 PCM with sample rate and channel count; supports MP3, FLAC, OGG/Vorbis, WAV, AIFF
+- **Metadata** — `QueryMetadataAsync` → EXIF fields and raw XMP packet as JSON; `StripMetadataAsync` removes metadata in-place from JPEG, PNG, and WebP without re-encoding
+- **Encode** — `EncodeImageAsync` → PNG or JPEG bytes from raw RGBA
+
+The bundled editor sandbox (`Assets/MediaSandbox/`) demonstrates all of the above: drag files into play mode and see them rendered or played immediately.
 
 ## Installing the Package
 
@@ -35,18 +38,16 @@ Or open **Window → Package Manager → + → Add package from git URL** and pa
 Requirements:
 
 - Unity 2022.3 or later (tested on 2022.3 LTS)
-- The `Wasmtime` NuGet package is vendored under `Assets/Packages/` — no additional install step
-- `wasmtime.dll` (native runtime) is under `Assets/Plugins/`
-- The compiled `decoder.wasm` lives at `Assets/StreamingAssets/mediasandbox/decoder.wasm`
+- [Wasmtime .NET SDK](https://www.nuget.org/packages/Wasmtime) NuGet package — install via [NuGetForUnity](https://github.com/GlitchEnzo/NuGetForUnity) or place the DLL in `Assets/Plugins/`. The native Wasmtime runtime for all platforms is bundled with the package; only the managed SDK is needed separately.
 
-To use:
+Setup:
 
-1. Open the project in Unity
-2. Enter play mode — the **Media Drop** window opens automatically
-3. Drag a media file onto the window or the Game view
-4. Check the Console and Scene for the spawned object
+1. [Install the package](#installing-the-package)
+2. Download `decoder.wasm` from the [latest CI build](../../actions/workflows/build.yml) (artifact `decoder-wasm`) and place it at `Assets/StreamingAssets/mediasandbox/decoder.wasm`
+3. Copy `Assets/MediaSandbox/MediaDecoderSandbox.cs` from this repository into your project. This class is the reference implementation — it is not included in the package itself. Attach it to a persistent GameObject.
+4. Call the async APIs on that component from your own scripts: `QueryAttributesAsync`, `DecodeImageAsync`, `DecodeAnimationAsync`, `DecodeAudioAsync`
 
-No setup component or scene configuration is required; `InitializeMediaSandbox` wires everything up via `[InitializeOnLoad]`.
+**To run the bundled editor sandbox**: clone this repository, open it as a Unity project, and enter play mode.
 
 ## Building
 
@@ -73,12 +74,16 @@ To rebuild the native Wasmtime runtime for a specific platform, see `scripts/bui
 ## Architecture
 
 ```
-Unity Editor (C#)
+Package: xyz.yewnyx.MediaSandbox (unity_package/Runtime/)
+  MediaTypes                  — public API types: MediaAttributes, RawImageData, AnimatedImageData, RawAudioData, …
+  SandboxLayout               — generated field offsets and enum discriminants (see Layout sync in ARCHITECTURE.md)
+
+Editor sandbox example (Assets/MediaSandbox/ — not part of the package)
+  MediaDecoderSandbox         — owns the Wasmtime Engine/Linker/Module (shared);
+                                creates one Store+Instance per decode call for concurrency
   InitializeMediaSandbox      — [InitializeOnLoad], wires play-mode hooks
   MediaDropWindow             — EditorWindow that receives drag-drop events
   DragDropMediaSpawner        — reads file bytes, dispatches to sandbox, spawns Unity objects
-  MediaDecoderSandbox         — owns the Wasmtime Engine/Linker/Module (shared);
-                                creates one Store+Instance per decode call for concurrency
 
 WASM boundary (Wasmtime .NET SDK + wasmtime.dll)
   decoder.wasm                — compiled from decoder/ Rust crate
@@ -135,3 +140,5 @@ Items that are known, understood, and explicitly deferred:
 ## License
 
 MIT
+
+The bundled Wasmtime native libraries (`unity_package/Plugins/`) are distributed under the [Apache 2.0 license](https://github.com/bytecodealliance/wasmtime/blob/main/LICENSE).

@@ -6,15 +6,27 @@ Technical reference and design rationale for the WASM-sandboxed media decoder.
 
 ## Component breakdown
 
-### Unity side (C#)
+### Package: `xyz.yewnyx.MediaSandbox` (`unity_package/`)
+
+The package delivers the native Wasmtime runtime for all supported platforms (`unity_package/Plugins/`) and the managed type library (`unity_package/Runtime/`).
+
+**`MediaTypes`** contains the public API types that flow across the WASM boundary: `MediaType`, `ImageFormat`, `MediaAttributes`, `RawImageData`, `AnimationFrame`, `AnimatedImageData`, `RawAudioData`, and `PathologicalMediaException`.
+
+**`SandboxLayout`** is a generated class containing exact field offsets and enum discriminants derived from the Rust types — see [C#↔Rust layout sync](#crust-layout-sync).
+
+### Editor sandbox example (`Assets/MediaSandbox/` — not part of the package)
+
+The repository includes a full working reference implementation. Consumers copy or adapt as needed; none of this ships with the package.
+
+**`MediaDecoderSandbox`** is the only class that touches Wasmtime directly. It owns the `Engine`, `Linker`, and `Module` — created once in `Awake()` and shared for the lifetime of play mode. Every public method creates its own `Store` and `Instance` on the thread pool and disposes them when the call returns.
+
+**`SandboxLimits`** holds project-specific policy constants: maximum file size before rejection and maximum image dimension before scaling. Consumers set their own limits.
 
 **`InitializeMediaSandbox`** runs at editor load via `[InitializeOnLoad]` and hooks `EditorApplication.playModeStateChanged` to create the `[SYSTEM] MediaSandbox` GameObject on play entry. Nothing in the scene needs to be configured — it wires itself up.
 
 **`MediaDropWindow`** is the `EditorWindow` that receives drag-drop events. It reads the raw file bytes from disk and hands them to `DragDropMediaSpawner`.
 
 **`DragDropMediaSpawner`** orchestrates the full decode pipeline: calls `QueryAttributesAsync` to identify the format and get buffer sizes, dispatches to the appropriate decode method, then marshals the result back to the main thread to create a `Texture2D`, `AudioClip`, or animation coroutine.
-
-**`MediaDecoderSandbox`** is the only class that touches Wasmtime directly. It owns the `Engine`, `Linker`, and `Module` — created once in `Awake()` and shared for the lifetime of play mode. Every public method creates its own `Store` and `Instance` on the thread pool and disposes them when the call returns.
 
 ### WASM side (Rust)
 
@@ -68,7 +80,7 @@ The streaming API lets the progress callback fire between frames, keeping the ed
 
 `AttrResult`'s field offsets and `MediaKind`'s integer discriminants are shared across the FFI boundary. Keeping them in sync by hand is fragile: a field added in Rust silently shifts every subsequent C# read offset with no compile error on either side.
 
-`decoder/src/bin/gen_cs.rs` is a host Rust binary (not WASM) in the same crate. It uses `std::mem::offset_of!` and `std::mem::size_of!` against the actual Rust types and prints `Assets/MediaSandbox/Generated/SandboxLayout.g.cs` — a C# file with all layout constants as `const int` values. `build-wasm.ps1` runs this binary before every WASM build. The generated file is committed to the repository so Unity can compile it without requiring the build script to have run.
+`decoder/src/bin/gen_cs.rs` is a host Rust binary (not WASM) in the same crate. It uses `std::mem::offset_of!` and `std::mem::size_of!` against the actual Rust types and prints `unity_package/Runtime/Generated/SandboxLayout.g.cs` — a C# file with all layout constants as `const int` values. `build-wasm.ps1` runs this binary before every WASM build. The generated file is committed to the repository so Unity can compile it without requiring the build script to have run.
 
 `MediaDecoderSandbox` calls `AssertLayoutSync()` from `Awake()` in Editor builds. This checks that the C# `MediaType` and `ImageFormat` enum values match `SandboxLayout.MediaKindValue` and `SandboxLayout.EncodeFormat`. If the Rust types are changed and the build script is not re-run, the assertion fires at play entry before any decode call runs.
 
