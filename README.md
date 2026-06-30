@@ -78,6 +78,16 @@ Rust crate (decoder/)
 
 Memory is managed explicitly: the host calls `alloc`/`dealloc` exports on the WASM instance. Each decode gets its own `Store`, so concurrent calls don't share state.
 
+### Unsafe code
+
+All `unsafe` in the Rust crate is at genuine FFI/allocator boundaries — there is no unsafe used for convenience. Every block falls into one of these categories:
+
+- **FFI ptr+len → slice** (`from_raw_parts` / `from_raw_parts_mut`): every exported function receives raw pointer + length pairs from the C ABI. There is no safe way to construct a Rust slice from these.
+- **Writing through raw output pointers** (`*(ptr as *mut u32) = value`): result values (frame count, delay, buffer addresses) are written back to host-allocated memory passed in as raw pointers.
+- **Global allocator** (`std::alloc::alloc` / `dealloc`): the `alloc` and `dealloc` WASM exports call the Rust global allocator directly, which is intrinsically unsafe.
+- **`ManuallyDrop::drop` in `AnimHandle`**: drop order must be explicit — the `Frames` iterator is torn down before the backing allocation it borrows from is freed. Rust's automatic drop order cannot express this, so `ManuallyDrop` and an explicit `Drop` impl are required.
+- **`Box::into_raw` / `Box::from_raw`** in `animation_open` / `animation_close`: the streaming decoder handle is a type-erased `u32` passed across the FFI boundary; boxing and unboxing it requires unsafe.
+
 ## Scope
 
 This is a sandbox tool for inspecting and previewing media inside the Unity Editor. It is not intended for shipping in a player build, production asset pipelines, or any context requiring stability guarantees. The WASM boundary provides a degree of isolation from malformed files but has not been audited for security.
