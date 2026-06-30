@@ -1,12 +1,13 @@
 {
   "dependencies": {
-    "xyz.yewnyx.mediasandbox": "file:../unity_package",
     "com.github-glitchenzo.nugetforunity": "https://github.com/GlitchEnzo/NuGetForUnity.git?path=/src/NuGetForUnity",
     "com.unity.feature.development": "1.0.1",
     "com.unity.textmeshpro": "3.0.9",
     "com.unity.timeline": "1.7.6",
+    "com.unity.toolchain.linux-x86_64": "2.0.11",
     "com.unity.ugui": "1.0.0",
     "com.unity.visualscripting": "1.9.4",
+    "xyz.yewnyx.mediasandbox": "file:../unity_package",
     "com.unity.modules.ai": "1.0.0",
     "com.unity.modules.androidjni": "1.0.0",
     "com.unity.modules.animation": "1.0.0",

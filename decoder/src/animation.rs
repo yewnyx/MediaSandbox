@@ -79,3 +79,69 @@ fn decode_webp(data: &[u8]) -> Result<Vec<(u32, RgbaImage)>, String> {
     let decoder = WebPDecoder::new(Cursor::new(data)).map_err(|e| e.to_string())?;
     collect_delay_and_image(decoder.into_frames())
 }
+
+// ── Streaming API ─────────────────────────────────────────────────────────────
+
+/// Opaque decoder state held across `animation_next_frame` calls.
+/// `Frames<'static>` is valid here because the iterator owns its data via
+/// `GifDecoder<Cursor<Vec<u8>>>` / `WebPDecoder<Cursor<Vec<u8>>>`, both of which
+/// are `'static` — no borrowed slices survive beyond construction.
+pub struct AnimHandle {
+    frames: image::Frames<'static>,
+    target_w: u32,
+    target_h: u32,
+}
+
+/// Creates a streaming decoder for `data`. Takes ownership of `data` (no host copy needed
+/// after this returns). Returns `Ok(Box<AnimHandle>)` on success.
+pub fn open(data: Vec<u8>, target_w: u32, target_h: u32) -> Result<Box<AnimHandle>, String> {
+    // Check format before moving data into the cursor.
+    let frames: image::Frames<'static> = if is_gif(&data) {
+        use image::codecs::gif::GifDecoder;
+        GifDecoder::new(Cursor::new(data)).map_err(|e| e.to_string())?.into_frames()
+    } else if is_webp(&data) {
+        use image::codecs::webp::WebPDecoder;
+        WebPDecoder::new(Cursor::new(data)).map_err(|e| e.to_string())?.into_frames()
+    } else {
+        return Err("unsupported animation format".into());
+    };
+    Ok(Box::new(AnimHandle { frames, target_w, target_h }))
+}
+
+/// Decodes the next frame, writing flipped RGBA directly into `out_rgba`.
+/// Returns `None` when the animation is exhausted, `Some(Ok(delay_ms))` on success.
+/// `out_rgba` must be exactly `target_w * target_h * 4` bytes.
+pub fn next_frame(handle: &mut AnimHandle, out_rgba: &mut [u8]) -> Option<Result<u32, String>> {
+    let frame = match handle.frames.next()? {
+        Ok(f)  => f,
+        Err(e) => return Some(Err(e.to_string())),
+    };
+
+    let (numer, denom) = frame.delay().numer_denom_ms();
+    let delay_ms = if denom == 0 { 100 } else { numer / denom };
+
+    let img = frame.into_buffer(); // RgbaImage
+    let (tw, th) = (handle.target_w, handle.target_h);
+
+    let needs_resize = tw > 0 && th > 0 && (img.width() != tw || img.height() != th);
+    let img = if needs_resize {
+        DynamicImage::ImageRgba8(img)
+            .resize_exact(tw, th, imageops::FilterType::Triangle)
+            .into_rgba8()
+    } else {
+        img
+    };
+
+    // Flip rows directly into the output — avoids the intermediate buffer that
+    // imageops::flip_vertical would allocate.
+    let w = img.width() as usize;
+    let h = img.height() as usize;
+    let row_bytes = w * 4;
+    let src = img.as_raw();
+    for row in 0..h {
+        let src_row = &src[(h - 1 - row) * row_bytes .. (h - row) * row_bytes];
+        out_rgba[row * row_bytes .. (row + 1) * row_bytes].copy_from_slice(src_row);
+    }
+
+    Some(Ok(delay_ms))
+}

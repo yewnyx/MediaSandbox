@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Threading;
 using UnityEngine;
 
@@ -94,7 +95,8 @@ namespace xyz.yewnyx.MediaSandbox
             }
 
             // Back on main thread after await — Unity API safe
-            SpawnTexturedQuad(name, raw.Width, raw.Height, raw.Rgba, attrs.CanHaveAlpha);
+            using (raw)
+                SpawnTexturedQuad(name, raw.Width, raw.Height, raw.Rgba, attrs.CanHaveAlpha);
         }
 
         // ── Animation ─────────────────────────────────────────────────────────
@@ -102,8 +104,18 @@ namespace xyz.yewnyx.MediaSandbox
         private async System.Threading.Tasks.Task SpawnAnimationAsync(
             byte[] data, MediaAttributes attrs, string name, CancellationToken ct)
         {
+            Debug.Log($"[MediaSandbox] Decoding '{name}' — {attrs.FrameCount} frames ({attrs.Width}×{attrs.Height})...");
+
+            int lastReportedPct = -1;
+            var progress = new Progress<float>(f => {
+                int pct = (int)(f * 100f / 10) * 10; // floor to nearest 10%
+                if (pct <= lastReportedPct) return;
+                lastReportedPct = pct;
+                Debug.Log($"[MediaSandbox] Decoding '{name}': {pct}%");
+            });
+
             AnimatedImageData anim;
-            try { anim = await _sandbox.DecodeAnimationAsync(data, ct); }
+            try { anim = await _sandbox.DecodeAnimationAsync(data, progress, ct); }
             catch (PathologicalMediaException ex)
             {
                 Debug.LogError($"[MediaSandbox] Rejected '{name}': {ex.Message}");
@@ -116,14 +128,14 @@ namespace xyz.yewnyx.MediaSandbox
                 return;
             }
 
-            if (anim.Frames.Length == 1)
+            Debug.Log($"[MediaSandbox] Decoded '{name}' — {anim.Frames.Length} frames");
+
+            using (anim)
             {
-                // Single-frame animation — treat as still image
-                SpawnTexturedQuad(name, anim.Width, anim.Height, anim.Frames[0].Rgba, attrs.CanHaveAlpha);
-            }
-            else
-            {
-                SpawnAnimatedQuad(name, anim, attrs.CanHaveAlpha);
+                if (anim.Frames.Length == 1)
+                    SpawnTexturedQuad(name, anim.Width, anim.Height, anim.Frames[0].Rgba, attrs.CanHaveAlpha);
+                else
+                    SpawnAnimatedQuad(name, anim, attrs.CanHaveAlpha);
             }
         }
 
@@ -132,8 +144,9 @@ namespace xyz.yewnyx.MediaSandbox
         private async System.Threading.Tasks.Task SpawnAudioAsync(
             byte[] data, string name, CancellationToken ct)
         {
+            Debug.Log($"[MediaSandbox] Decoding audio '{name}'...");
             RawAudioData raw;
-            try { raw = await _sandbox.DecodeAudioAsync(data, ct: ct); }
+            try { raw = await _sandbox.DecodeAudioAsync(data, ct); }
             catch (PathologicalMediaException ex)
             {
                 Debug.LogError($"[MediaSandbox] Rejected '{name}': {ex.Message}");
@@ -165,18 +178,24 @@ namespace xyz.yewnyx.MediaSandbox
             new Vector3(width / (float)height, 1f, 1f);
 
         /// Scans RGBA bytes for any pixel with alpha < 255. Early-exits on first hit.
-        private static bool HasAnyTransparency(byte[] rgba)
+        private static bool HasAnyTransparency(ReadOnlyMemory<byte> rgba) => HasAnyTransparency(rgba.Span);
+        private static bool HasAnyTransparency(ReadOnlySpan<byte> rgba)
         {
             for (int i = 3; i < rgba.Length; i += 4)
                 if (rgba[i] < 255) return true;
             return false;
         }
 
-        private static void SpawnTexturedQuad(string name, int width, int height, byte[] rgba, bool canHaveAlpha)
+        private static void SpawnTexturedQuad(string name, int width, int height, ReadOnlyMemory<byte> rgba, bool canHaveAlpha)
         {
             // linear: false — sRGB-encoded input; GPU linearises during sampling in a linear-space project.
             var tex = new Texture2D(width, height, TextureFormat.RGBA32, mipChain: false, linear: false);
-            tex.LoadRawTextureData(rgba);
+            // LoadRawTextureData(byte[]) uses array.Length, which may exceed our slice if the buffer
+            // is pooled. Pin the underlying array and use the (IntPtr, int) overload instead.
+            MemoryMarshal.TryGetArray(rgba, out var seg);
+            var pin = GCHandle.Alloc(seg.Array, GCHandleType.Pinned);
+            try   { tex.LoadRawTextureData(pin.AddrOfPinnedObject() + seg.Offset, seg.Count); }
+            finally { pin.Free(); }
             tex.Apply();
 
             var go  = GameObject.CreatePrimitive(PrimitiveType.Quad);
@@ -184,7 +203,7 @@ namespace xyz.yewnyx.MediaSandbox
             go.transform.position   = Vector3.zero;
             go.transform.localScale = AspectScale(width, height);
 
-            bool hasAlpha  = canHaveAlpha && HasAnyTransparency(rgba);
+            bool hasAlpha  = canHaveAlpha && HasAnyTransparency(rgba.Span);
             var shaderName = hasAlpha ? "Unlit/Transparent" : "Unlit/Texture";
             var mat        = new Material(Shader.Find(shaderName));
             mat.mainTexture = tex;
@@ -206,30 +225,37 @@ namespace xyz.yewnyx.MediaSandbox
             var mat        = new Material(Shader.Find(shaderName));
             go.GetComponent<MeshRenderer>().material = mat;
 
-            // Bake all frame textures up front.
+            // Bake all frame textures up front; extract delays before releasing pooled buffers.
             // linear: false — sRGB-encoded input; GPU linearises during sampling in a linear-space project.
             var textures = new Texture2D[anim.Frames.Length];
+            var delaysMs = new int[anim.Frames.Length];
             for (int i = 0; i < anim.Frames.Length; i++)
             {
                 var t = new Texture2D(anim.Width, anim.Height, TextureFormat.RGBA32, mipChain: false, linear: false);
-                t.LoadRawTextureData(anim.Frames[i].Rgba);
+                MemoryMarshal.TryGetArray(anim.Frames[i].Rgba, out var seg);
+                var pin = GCHandle.Alloc(seg.Array, GCHandleType.Pinned);
+                try   { t.LoadRawTextureData(pin.AddrOfPinnedObject() + seg.Offset, seg.Count); }
+                finally { pin.Free(); }
                 t.Apply();
                 textures[i] = t;
+                delaysMs[i] = anim.Frames[i].DelayMs;
             }
+            // All RGBA data is now on the GPU — return pooled buffers before starting the coroutine.
+            anim.Dispose();
 
             Debug.Log($"[MediaSandbox] Spawned animation '{name}' ({anim.Width}×{anim.Height}, " +
                       $"{anim.Frames.Length} frames{(hasAlpha ? ", alpha" : "")})");
-            StartCoroutine(AnimateQuad(mat, textures, anim.Frames, _cts.Token));
+            StartCoroutine(AnimateQuad(mat, textures, delaysMs, _cts.Token));
         }
 
         private static IEnumerator AnimateQuad(
-            Material mat, Texture2D[] textures, AnimationFrame[] frames, CancellationToken ct)
+            Material mat, Texture2D[] textures, int[] delaysMs, CancellationToken ct)
         {
             int i = 0;
             while (!ct.IsCancellationRequested)
             {
                 mat.mainTexture = textures[i];
-                float delay = frames[i].DelayMs / 1000f;
+                float delay = delaysMs[i] / 1000f;
                 if (delay <= 0f) delay = 0.1f;
                 yield return new WaitForSeconds(delay);
                 i = (i + 1) % textures.Length;

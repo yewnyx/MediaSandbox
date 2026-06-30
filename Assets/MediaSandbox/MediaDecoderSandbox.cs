@@ -1,4 +1,6 @@
 using System;
+using System.Buffers;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -238,14 +240,21 @@ namespace xyz.yewnyx.MediaSandbox
             int outLen  = targetW * targetH * 4;
             int dataPtr = WasmWrite(instance, memory, data);
             int outPtr  = WasmAlloc(instance, outLen);
+            byte[] pooled = null;
             try
             {
                 int code = instance.GetFunction<int, int, int, int, int, int, int>("decode_image")!
                     (dataPtr, data.Length, outPtr, outLen, targetW, targetH);
                 if (code != 0) throw new Exception($"decode_image failed ({code})");
 
-                var rgba = memory.GetSpan(outPtr, outLen).ToArray();
-                return new RawImageData(targetW, targetH, rgba);
+                pooled = ArrayPool<byte>.Shared.Rent(outLen);
+                memory.GetSpan(outPtr, outLen).CopyTo(pooled);
+                return new RawImageData(targetW, targetH, pooled, outLen);
+            }
+            catch
+            {
+                if (pooled != null) ArrayPool<byte>.Shared.Return(pooled);
+                throw;
             }
             finally
             {
@@ -255,11 +264,16 @@ namespace xyz.yewnyx.MediaSandbox
         }
 
         /// <summary>
-        /// Decodes an animation (GIF or WebP, static or animated).
+        /// Decodes an animation (GIF or WebP, static or animated) frame by frame.
+        /// Progress is reported in [0,1] as each frame completes; callbacks fire on the
+        /// thread pool so they reach the Unity main thread via SynchronizationContext
+        /// spread across the real decode time rather than in a post-decode burst.
         /// A single-frame result means the source was a still image — spawner handles both.
         /// </summary>
         public Task<AnimatedImageData> DecodeAnimationAsync(
-            ReadOnlyMemory<byte> data, CancellationToken ct = default)
+            ReadOnlyMemory<byte> data,
+            IProgress<float> progress = null,
+            CancellationToken ct = default)
         {
             return Task.Run(async () => {
                 var attrs = await QueryAttributesAsync(data, ct);
@@ -273,49 +287,54 @@ namespace xyz.yewnyx.MediaSandbox
                 var (store, instance, memory) = CreateInstance();
                 using (store)
                 {
-                    return DecodeAnimationCore(instance, memory, data.Span, attrs, tw, th);
+                    return DecodeAnimationStreaming(instance, memory, data.Span, attrs.FrameCount, tw, th, progress);
                 }
             }, ct);
         }
 
-        private static AnimatedImageData DecodeAnimationCore(
-            Instance instance, Memory memory, ReadOnlySpan<byte> data, MediaAttributes attrs,
-            int targetW, int targetH)
+        private static AnimatedImageData DecodeAnimationStreaming(
+            Instance instance, Memory memory, ReadOnlySpan<byte> data,
+            int frameCount, int targetW, int targetH, IProgress<float> progress)
         {
-            int outLen  = 4 + attrs.FrameCount * 4 + targetW * targetH * 4 * attrs.FrameCount;
-            int dataPtr = WasmWrite(instance, memory, data);
-            int outPtr  = WasmAlloc(instance, outLen);
+            int frameBytes = targetW * targetH * 4;
+            // animation_open consumes dataPtr internally — host must not dealloc it.
+            int dataPtr  = WasmWrite(instance, memory, data);
+            int delayPtr = WasmAlloc(instance, 4);
+            int rgbaPtr  = WasmAlloc(instance, frameBytes);
+            int handle   = 0;
+            var frames   = new List<AnimationFrame>(frameCount);
             try
             {
-                int code = instance.GetFunction<int, int, int, int, int, int, int>("decode_animation")!
-                    (dataPtr, data.Length, outPtr, outLen, targetW, targetH);
-                if (code != 0) throw new Exception($"decode_animation failed ({code})");
+                handle = instance.GetFunction<int, int, int, int, int>("animation_open")!
+                    (dataPtr, data.Length, targetW, targetH);
+                if (handle == 0) throw new Exception("animation_open failed");
 
-                return ParseAnimationOutput(memory.GetSpan(outPtr, outLen), targetW, targetH);
+                int status;
+                while ((status = instance.GetFunction<int, int, int, int, int>("animation_next_frame")!
+                    (handle, delayPtr, rgbaPtr, frameBytes)) == 0)
+                {
+                    int delayMs  = memory.ReadInt32(delayPtr);
+                    byte[] pooled = ArrayPool<byte>.Shared.Rent(frameBytes);
+                    memory.GetSpan(rgbaPtr, frameBytes).CopyTo(pooled);
+                    frames.Add(new AnimationFrame(pooled, frameBytes, delayMs));
+                    progress?.Report(frames.Count / (float)frameCount);
+                }
+                if (status != 1) throw new Exception($"animation_next_frame error ({status})");
+
+                return new AnimatedImageData(targetW, targetH, frames.ToArray());
+            }
+            catch
+            {
+                foreach (var f in frames) f.Dispose();
+                throw;
             }
             finally
             {
-                WasmDealloc(instance, dataPtr, data.Length);
-                WasmDealloc(instance, outPtr, outLen);
+                if (handle != 0)
+                    instance.GetAction<int>("animation_close")!(handle);
+                WasmDealloc(instance, delayPtr, 4);
+                WasmDealloc(instance, rgbaPtr, frameBytes);
             }
-        }
-
-        private static AnimatedImageData ParseAnimationOutput(
-            Span<byte> output, int width, int height)
-        {
-            int frameCount = MemoryMarshal.Read<int>(output);
-            int frameBytes = width * height * 4;
-            var frames     = new AnimationFrame[frameCount];
-
-            for (int i = 0; i < frameCount; i++)
-            {
-                int delayMs    = MemoryMarshal.Read<int>(output.Slice(4 + i * 4));
-                int dataOffset = 4 + frameCount * 4 + i * frameBytes;
-                var rgba       = output.Slice(dataOffset, frameBytes).ToArray();
-                frames[i]      = new AnimationFrame(rgba, delayMs);
-            }
-
-            return new AnimatedImageData(width, height, frames);
         }
 
         /// <summary>
@@ -324,7 +343,6 @@ namespace xyz.yewnyx.MediaSandbox
         /// </summary>
         public Task<RawAudioData> DecodeAudioAsync(
             ReadOnlyMemory<byte> data,
-            IProgress<float> progress = null,
             CancellationToken ct = default)
         {
             return Task.Run(async () => {
@@ -337,10 +355,7 @@ namespace xyz.yewnyx.MediaSandbox
                     throw new InvalidOperationException($"Expected Audio, got {attrs.Type}");
 
                 var (store, instance, memory) = CreateInstance();
-                using (store)
-                {
-                    return DecodeAudioCore(instance, memory, data.Span);
-                }
+                using (store) { return DecodeAudioCore(instance, memory, data.Span); }
             }, ct);
         }
 
@@ -404,7 +419,7 @@ namespace xyz.yewnyx.MediaSandbox
         {
             int outPtrAddr = WasmAlloc(instance, 4);
             int outLenAddr = WasmAlloc(instance, 4);
-            int rgbaPtr    = WasmWrite(instance, memory, image.Rgba);
+            int rgbaPtr    = WasmWrite(instance, memory, image.Rgba.Span);
             try
             {
                 int code = instance.GetFunction<int, int, int, int, int, int, int>("encode_image")!
@@ -420,7 +435,7 @@ namespace xyz.yewnyx.MediaSandbox
             }
             finally
             {
-                WasmDealloc(instance, rgbaPtr, image.Rgba.Length);
+                WasmDealloc(instance, rgbaPtr, image.Rgba.Length); // ReadOnlyMemory.Length is the exact slice length
                 WasmDealloc(instance, outPtrAddr, 4);
                 WasmDealloc(instance, outLenAddr, 4);
             }

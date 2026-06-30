@@ -1,4 +1,6 @@
 using System;
+using System.Buffers;
+using System.Threading;
 
 namespace xyz.yewnyx.MediaSandbox
 {
@@ -52,43 +54,72 @@ namespace xyz.yewnyx.MediaSandbox
         }
     }
 
-    public readonly struct RawImageData
+    /// <summary>
+    /// Decoded RGBA pixels for a single image. Backed by a pooled buffer;
+    /// dispose after uploading to a Texture2D.
+    /// </summary>
+    public sealed class RawImageData : IDisposable
     {
-        public readonly int    Width;
-        public readonly int    Height;
-        public readonly byte[] Rgba;
+        private byte[] _pooled;
+        public int Width  { get; }
+        public int Height { get; }
+        public ReadOnlyMemory<byte> Rgba { get; }
 
-        public RawImageData(int width, int height, byte[] rgba)
+        internal RawImageData(int width, int height, byte[] pooled, int length)
         {
-            Width  = width;
-            Height = height;
-            Rgba   = rgba;
+            Width   = width;
+            Height  = height;
+            _pooled = pooled;
+            Rgba    = new ReadOnlyMemory<byte>(pooled, 0, length);
+        }
+
+        public void Dispose()
+        {
+            var arr = Interlocked.Exchange(ref _pooled, null);
+            if (arr != null) ArrayPool<byte>.Shared.Return(arr);
         }
     }
 
-    public readonly struct AnimationFrame
+    /// <summary>
+    /// One frame of a decoded animation. Backed by a pooled buffer;
+    /// the parent <see cref="AnimatedImageData"/> disposes all frames together.
+    /// </summary>
+    public sealed class AnimationFrame : IDisposable
     {
-        public readonly byte[] Rgba;
-        public readonly int    DelayMs;
+        private byte[] _pooled;
+        public ReadOnlyMemory<byte> Rgba   { get; }
+        public int                  DelayMs { get; }
 
-        public AnimationFrame(byte[] rgba, int delayMs)
+        internal AnimationFrame(byte[] pooled, int length, int delayMs)
         {
-            Rgba    = rgba;
+            _pooled = pooled;
+            Rgba    = new ReadOnlyMemory<byte>(pooled, 0, length);
             DelayMs = delayMs;
         }
+
+        public void Dispose()
+        {
+            var arr = Interlocked.Exchange(ref _pooled, null);
+            if (arr != null) ArrayPool<byte>.Shared.Return(arr);
+        }
     }
 
-    public sealed class AnimatedImageData
+    public sealed class AnimatedImageData : IDisposable
     {
-        public readonly int              Width;
-        public readonly int              Height;
-        public readonly AnimationFrame[] Frames;
+        public int              Width  { get; }
+        public int              Height { get; }
+        public AnimationFrame[] Frames { get; }
 
-        public AnimatedImageData(int width, int height, AnimationFrame[] frames)
+        internal AnimatedImageData(int width, int height, AnimationFrame[] frames)
         {
             Width  = width;
             Height = height;
             Frames = frames;
+        }
+
+        public void Dispose()
+        {
+            foreach (var f in Frames) f.Dispose();
         }
     }
 

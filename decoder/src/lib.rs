@@ -139,6 +139,64 @@ pub extern "C" fn decode_animation(
     0
 }
 
+// ── Animation streaming decode ────────────────────────────────────────────────
+
+/// Opens a streaming animation decoder. Consumes data_ptr — the WASM module takes its
+/// own copy and immediately frees the caller's buffer via dealloc; the host must NOT
+/// call dealloc(data_ptr) after this returns.
+/// Returns a non-zero handle on success, 0 on error (buffer is still freed on error).
+/// Call animation_next_frame repeatedly, then animation_close to free the handle.
+#[no_mangle]
+pub extern "C" fn animation_open(
+    data_ptr: u32, data_len: u32,
+    target_w: u32, target_h: u32,
+) -> u32 {
+    let data = unsafe {
+        std::slice::from_raw_parts(data_ptr as *const u8, data_len as usize).to_vec()
+    };
+    // Free the caller's buffer — animation_open always consumes data_ptr.
+    dealloc(data_ptr, data_len);
+    match animation::open(data, target_w, target_h) {
+        Ok(handle) => Box::into_raw(handle) as u32,
+        Err(_) => 0,
+    }
+}
+
+/// Decodes the next frame into host-pre-allocated buffers.
+///   out_delay_ms_ptr : host alloc(4)                       — receives frame delay in ms
+///   out_rgba_ptr     : host alloc(target_w * target_h * 4) — receives RGBA bytes (flipped)
+///   out_rgba_len     : byte length of the rgba buffer
+/// Returns 0 = frame written, 1 = animation exhausted (done), -1 = error.
+#[no_mangle]
+pub extern "C" fn animation_next_frame(
+    handle: u32,
+    out_delay_ms_ptr: u32,
+    out_rgba_ptr: u32,
+    out_rgba_len: u32,
+) -> i32 {
+    if handle == 0 { return -1; }
+    let handle_ref = unsafe { &mut *(handle as *mut animation::AnimHandle) };
+    let out_rgba = unsafe {
+        std::slice::from_raw_parts_mut(out_rgba_ptr as *mut u8, out_rgba_len as usize)
+    };
+    match animation::next_frame(handle_ref, out_rgba) {
+        None => 1,
+        Some(Err(_)) => -1,
+        Some(Ok(delay_ms)) => {
+            unsafe { *(out_delay_ms_ptr as *mut u32) = delay_ms; }
+            0
+        }
+    }
+}
+
+/// Frees a handle returned by animation_open.
+#[no_mangle]
+pub extern "C" fn animation_close(handle: u32) {
+    if handle != 0 {
+        unsafe { drop(Box::from_raw(handle as *mut animation::AnimHandle)) };
+    }
+}
+
 // ── Audio decode ─────────────────────────────────────────────────────────────
 
 /// Decodes audio to interleaved f32 PCM.

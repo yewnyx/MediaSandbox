@@ -27,6 +27,22 @@ namespace xyz.yewnyx.MediaSandbox
                 MediaDropWindow.TryClose();
             }
         }
+
+        [MenuItem("MediaSandbox/Open Media File...")]
+        private static void OpenMediaFile()
+        {
+            var spawner = Object.FindFirstObjectByType<DragDropMediaSpawner>();
+            if (spawner == null)
+            {
+                EditorUtility.DisplayDialog("MediaSandbox", "Enter Play mode first.", "OK");
+                return;
+            }
+
+            var path = EditorUtility.OpenFilePanel("Open Media File", "", "png,jpg,jpeg,gif,webp,mp3,flac,wav,ogg,mp4,webm,mkv");
+            if (string.IsNullOrEmpty(path)) return;
+
+            spawner.HandleDrop(path);
+        }
     }
 }
 #endif
