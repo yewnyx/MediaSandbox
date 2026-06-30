@@ -10,7 +10,7 @@ namespace xyz.yewnyx.MediaSandbox
     internal static class SandboxLayout
     {
 
-        // AttrResult memory layout — mirror of #[repr(C)] AttrResult in decoder/src/attrs.rs
+        // AttrResult memory layout -- mirror of #[repr(C)] AttrResult in decoder/src/attrs.rs
         public const int AttrResultSize = 56;
 
         internal static class AttrResultField
@@ -28,13 +28,13 @@ namespace xyz.yewnyx.MediaSandbox
             public const int Flags              = 48;
         }
 
-        // AttrResult.flags bit values — mirror of ALPHA_POSSIBLE in decoder/src/attrs.rs
+        // AttrResult.flags bit values -- mirror of ALPHA_POSSIBLE in decoder/src/attrs.rs
         internal static class AttrFlags
         {
             public const uint AlphaPossible = 1u;
         }
 
-        // media_type field values — mirror of #[repr(u32)] MediaKind in decoder/src/attrs.rs
+        // media_type field values -- mirror of #[repr(u32)] MediaKind in decoder/src/attrs.rs
         internal static class MediaKindValue
         {
             public const int Unknown   = 0;
@@ -43,7 +43,7 @@ namespace xyz.yewnyx.MediaSandbox
             public const int Audio     = 3;
         }
 
-        // encode_image format argument — mirror of constants in decoder/src/img.rs
+        // encode_image format argument -- mirror of constants in decoder/src/img.rs
         internal static class EncodeFormat
         {
             public const int Png  = 0;

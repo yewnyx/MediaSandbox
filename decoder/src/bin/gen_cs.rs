@@ -1,4 +1,4 @@
-// Codegen binary — builds for the host, not for WASM.
+// Codegen binary -- builds for the host, not for WASM.
 // Run via:  cargo build --bin gen_cs  (from the decoder/ directory)
 // The build-wasm.ps1 script runs this automatically and writes the output to
 // Assets/MediaSandbox/Generated/SandboxLayout.g.cs.
@@ -19,7 +19,7 @@ fn main() {
     println!("    internal static class SandboxLayout");
     println!("    {{");
     println!();
-    println!("        // AttrResult memory layout — mirror of #[repr(C)] AttrResult in decoder/src/attrs.rs");
+    println!("        // AttrResult memory layout -- mirror of #[repr(C)] AttrResult in decoder/src/attrs.rs");
     println!("        public const int AttrResultSize = {};", size_of::<AttrResult>());
     println!();
     println!("        internal static class AttrResultField");
@@ -37,13 +37,13 @@ fn main() {
     println!("            public const int Flags              = {};", offset_of!(AttrResult, flags));
     println!("        }}");
     println!();
-    println!("        // AttrResult.flags bit values — mirror of ALPHA_POSSIBLE in decoder/src/attrs.rs");
+    println!("        // AttrResult.flags bit values -- mirror of ALPHA_POSSIBLE in decoder/src/attrs.rs");
     println!("        internal static class AttrFlags");
     println!("        {{");
     println!("            public const uint AlphaPossible = {}u;", ALPHA_POSSIBLE);
     println!("        }}");
     println!();
-    println!("        // media_type field values — mirror of #[repr(u32)] MediaKind in decoder/src/attrs.rs");
+    println!("        // media_type field values -- mirror of #[repr(u32)] MediaKind in decoder/src/attrs.rs");
     println!("        internal static class MediaKindValue");
     println!("        {{");
     println!("            public const int Unknown   = {};", MediaKind::Unknown   as u32);
@@ -52,7 +52,7 @@ fn main() {
     println!("            public const int Audio     = {};", MediaKind::Audio     as u32);
     println!("        }}");
     println!();
-    println!("        // encode_image format argument — mirror of constants in decoder/src/img.rs");
+    println!("        // encode_image format argument -- mirror of constants in decoder/src/img.rs");
     println!("        internal static class EncodeFormat");
     println!("        {{");
     println!("            public const int Png  = {};", ENCODE_FORMAT_PNG);

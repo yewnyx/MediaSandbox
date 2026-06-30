@@ -60,7 +60,7 @@ Animations are decoded frame-by-frame via `animation_open` / `animation_next_fra
 
 Ownership of the input buffer transfers to `animation_open` — the module takes its own copy and frees the caller's buffer internally on the same call. The host must not call `dealloc` on it afterward.
 
-The streaming API lets the progress callback fire between frames, keeping the editor UI responsive during long GIF decodes. A batch `decode_animation` export also exists for completeness but is not used by the spawner.
+The streaming API lets the progress callback fire between frames, keeping the editor UI responsive during long GIF decodes.
 
 ---
 

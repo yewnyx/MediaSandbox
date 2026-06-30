@@ -93,53 +93,6 @@ pub extern "C" fn encode_image(
     }
 }
 
-// ── Animation decode ─────────────────────────────────────────────────────────
-
-/// Decodes GIF or WebP animation.
-/// Host pre-allocates `out_len` = `4 + frame_count*4 + target_w*target_h*4*frame_count`.
-/// Pass target_w/target_h == 0 to decode at native resolution.
-///
-/// Output layout:
-///   [frame_count: u32 LE]
-///   [delay_ms_0: u32 LE] … [delay_ms_N-1: u32 LE]
-///   [frame_0_rgba: W×H×4] … [frame_N-1_rgba: W×H×4]
-#[no_mangle]
-pub extern "C" fn decode_animation(
-    data_ptr: u32, data_len: u32,
-    out_ptr: u32, out_len: u32,
-    target_w: u32, target_h: u32,
-) -> i32 {
-    let data = unsafe { std::slice::from_raw_parts(data_ptr as *const u8, data_len as usize) };
-    let out = unsafe { std::slice::from_raw_parts_mut(out_ptr as *mut u8, out_len as usize) };
-
-    let frames = match animation::decode(data, target_w, target_h) {
-        Ok(f) => f,
-        Err(_) => return -1,
-    };
-
-    let n = frames.len() as u32;
-    let mut offset = 0usize;
-
-    if offset + 4 > out.len() { return -2; }
-    out[offset..offset + 4].copy_from_slice(&n.to_le_bytes());
-    offset += 4;
-
-    for (delay_ms, _) in &frames {
-        if offset + 4 > out.len() { return -2; }
-        out[offset..offset + 4].copy_from_slice(&delay_ms.to_le_bytes());
-        offset += 4;
-    }
-
-    for (_, img) in &frames {
-        let raw = img.as_raw();
-        if offset + raw.len() > out.len() { return -2; }
-        out[offset..offset + raw.len()].copy_from_slice(raw);
-        offset += raw.len();
-    }
-
-    0
-}
-
 // ── Animation streaming decode ────────────────────────────────────────────────
 
 /// Opens a streaming animation decoder. Consumes data_ptr — the WASM module takes its

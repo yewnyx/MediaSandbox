@@ -112,30 +112,6 @@ pub fn query(data: &[u8]) -> Result<(u32, u32, u32), String> {
     Ok((w, h, frames.len() as u32))
 }
 
-// Returns Vec<(delay_ms, RgbaImage)>
-// TODO(perf): decode frames at target size without full-resolution intermediates.
-pub fn decode(data: &[u8], target_w: u32, target_h: u32) -> Result<Vec<(u32, RgbaImage)>, String> {
-    let frames = decode_frames(data)?;
-
-    // Unity's LoadRawTextureData expects bottom-to-top row order (OpenGL convention).
-    // Flip every frame unconditionally. Resize only when a valid target is given.
-    Ok(frames
-        .into_iter()
-        .map(|(delay, img)| {
-            let needs_resize = target_w > 0 && target_h > 0
-                && (img.width() != target_w || img.height() != target_h);
-            let img = if needs_resize {
-                DynamicImage::ImageRgba8(img)
-                    .resize_exact(target_w, target_h, imageops::FilterType::Triangle)
-                    .into_rgba8()
-            } else {
-                img
-            };
-            (delay, imageops::flip_vertical(&img))
-        })
-        .collect())
-}
-
 fn decode_frames(data: &[u8]) -> Result<Vec<(u32, RgbaImage)>, String> {
     if is_gif(data) {
         decode_gif(data)

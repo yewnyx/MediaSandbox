@@ -40,6 +40,7 @@ if ($LASTEXITCODE -ne 0) { Write-Error 'gen_cs build failed'; exit $LASTEXITCODE
 $GenExe  = "decoder\target\debug\gen_cs.exe"
 $GenDest = 'Assets\MediaSandbox\Generated'
 New-Item -ItemType Directory -Force $GenDest | Out-Null
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 & $GenExe | Set-Content "$GenDest\SandboxLayout.g.cs" -Encoding UTF8
 if ($LASTEXITCODE -ne 0) { Write-Error 'gen_cs execution failed'; exit $LASTEXITCODE }
 Write-Host "==> Generated → $GenDest\SandboxLayout.g.cs"
