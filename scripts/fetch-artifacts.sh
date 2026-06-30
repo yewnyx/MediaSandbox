@@ -52,9 +52,8 @@ install_artifact() {
             ;;
         ios)
             DST="$REPO_ROOT/unity_package/Plugins/iOS/Wasmtime.xcframework"
-            rm -rf "$DST"
-            mkdir -p "$(dirname "$DST")"
-            cp -r "$SRC" "$DST"
+            mkdir -p "$DST"
+            cp -r "$SRC/." "$DST/"
             echo "    → unity_package/Plugins/iOS/Wasmtime.xcframework/"
             ;;
         android)

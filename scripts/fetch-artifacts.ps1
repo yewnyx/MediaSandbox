@@ -56,9 +56,15 @@ function Install-Artifact([string]$art, [string]$src) {
         }
         'ios' {
             $dst = Join-Path $RepoRoot 'unity_package\Plugins\iOS\Wasmtime.xcframework'
-            if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
-            New-Item -ItemType Directory -Force (Split-Path $dst) | Out-Null
-            Copy-Item $src $dst -Recurse -Force
+            New-Item -ItemType Directory -Force $dst | Out-Null
+            # Copy files individually to merge into the existing tree rather than
+            # replacing the directory, which would delete the .meta files.
+            Get-ChildItem $src -Recurse -File | ForEach-Object {
+                $rel  = $_.FullName.Substring($src.Length).TrimStart('\', '/')
+                $dest = Join-Path $dst $rel
+                New-Item -ItemType Directory -Force (Split-Path $dest) | Out-Null
+                Copy-Item $_.FullName $dest -Force
+            }
             Write-Host '    → unity_package/Plugins/iOS/Wasmtime.xcframework/'
         }
         'android' {
