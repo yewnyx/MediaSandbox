@@ -16,6 +16,20 @@ A Unity Editor tool for drag-and-dropping media files — images, animations, au
 - Rejects files over 512 MB before decode; images larger than 8192 px in either dimension are scaled down to fit (full decode then resize — see Future Work)
 - Supports EXIF/XMP metadata query (`query_metadata`) and in-place metadata stripping without re-encoding (`strip_metadata`) for JPEG, PNG, and WebP
 
+## Installing the Package
+
+Add the package to your project's `Packages/manifest.json` via Git URL:
+
+```json
+{
+  "dependencies": {
+    "xyz.yewnyx.mediasandbox": "https://github.com/yewnyx/mediasandbox.git?path=/unity_package"
+  }
+}
+```
+
+Or open **Window → Package Manager → + → Add package from git URL** and paste the same URL.
+
 ## Getting Started
 
 Requirements:
@@ -46,7 +60,7 @@ pwsh scripts/build-wasm.ps1 -Release # smallest output
 pwsh scripts/build-wasm.ps1 -Debug   # unoptimised
 ```
 
-The build script also runs `gen_cs` (a host Rust binary in the same crate) to regenerate `Assets/MediaSandbox/Generated/SandboxLayout.g.cs` — a C# file containing exact struct offsets and enum discriminants derived from the Rust types. Commit it alongside the WASM binary.
+The build script also runs `gen_cs` (a host Rust binary in the same crate) to regenerate `unity_package/Runtime/Generated/SandboxLayout.g.cs` — a C# file containing exact struct offsets and enum discriminants derived from the Rust types. Commit it alongside the WASM binary.
 
 Output lands at `Assets/StreamingAssets/mediasandbox/decoder.wasm`. You need the Rust toolchain with the WASM target:
 

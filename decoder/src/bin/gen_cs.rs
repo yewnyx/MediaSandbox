@@ -1,7 +1,7 @@
 // Codegen binary -- builds for the host, not for WASM.
 // Run via:  cargo build --bin gen_cs  (from the decoder/ directory)
 // The build-wasm.ps1 script runs this automatically and writes the output to
-// Assets/MediaSandbox/Generated/SandboxLayout.g.cs.
+// unity_package/Runtime/Generated/SandboxLayout.g.cs.
 use std::mem::{offset_of, size_of};
 
 use decoder::{AttrResult, MediaKind, ALPHA_POSSIBLE, ENCODE_FORMAT_JPEG, ENCODE_FORMAT_PNG};
@@ -16,13 +16,13 @@ fn main() {
     println!();
     println!("namespace xyz.yewnyx.MediaSandbox");
     println!("{{");
-    println!("    internal static class SandboxLayout");
+    println!("    public static class SandboxLayout");
     println!("    {{");
     println!();
     println!("        // AttrResult memory layout -- mirror of #[repr(C)] AttrResult in decoder/src/attrs.rs");
     println!("        public const int AttrResultSize = {};", size_of::<AttrResult>());
     println!();
-    println!("        internal static class AttrResultField");
+    println!("        public static class AttrResultField");
     println!("        {{");
     println!("            public const int DurationMs         = {};", offset_of!(AttrResult, duration_ms));
     println!("            public const int RequiredBufferSize = {};", offset_of!(AttrResult, required_buffer_size));
@@ -38,13 +38,13 @@ fn main() {
     println!("        }}");
     println!();
     println!("        // AttrResult.flags bit values -- mirror of ALPHA_POSSIBLE in decoder/src/attrs.rs");
-    println!("        internal static class AttrFlags");
+    println!("        public static class AttrFlags");
     println!("        {{");
     println!("            public const uint AlphaPossible = {}u;", ALPHA_POSSIBLE);
     println!("        }}");
     println!();
     println!("        // media_type field values -- mirror of #[repr(u32)] MediaKind in decoder/src/attrs.rs");
-    println!("        internal static class MediaKindValue");
+    println!("        public static class MediaKindValue");
     println!("        {{");
     println!("            public const int Unknown   = {};", MediaKind::Unknown   as u32);
     println!("            public const int Image     = {};", MediaKind::Image     as u32);
@@ -53,7 +53,7 @@ fn main() {
     println!("        }}");
     println!();
     println!("        // encode_image format argument -- mirror of constants in decoder/src/img.rs");
-    println!("        internal static class EncodeFormat");
+    println!("        public static class EncodeFormat");
     println!("        {{");
     println!("            public const int Png  = {};", ENCODE_FORMAT_PNG);
     println!("            public const int Jpeg = {};", ENCODE_FORMAT_JPEG);

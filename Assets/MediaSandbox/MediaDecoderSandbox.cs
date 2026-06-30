@@ -6,8 +6,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 using Wasmtime;
+using xyz.yewnyx.MediaSandbox;
 
-namespace xyz.yewnyx.MediaSandbox
+namespace xyz.yewnyx.MediaSandboxExample
 {
     /// <summary>
     /// Wraps the decoder.wasm sandbox. Engine, Linker, and Module are shared across calls;

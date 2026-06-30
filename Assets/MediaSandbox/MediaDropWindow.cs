@@ -2,7 +2,7 @@
 using UnityEditor;
 using UnityEngine;
 
-namespace xyz.yewnyx.MediaSandbox
+namespace xyz.yewnyx.MediaSandboxExample
 {
     public sealed class MediaDropWindow : EditorWindow
     {

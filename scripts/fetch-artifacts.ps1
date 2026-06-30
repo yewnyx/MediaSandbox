@@ -65,7 +65,11 @@ function Install-Artifact([string]$art, [string]$src) {
             $dst = Join-Path $RepoRoot 'unity_package\Plugins\Android\libs'
             New-Item -ItemType Directory -Force $dst | Out-Null
             Get-ChildItem $src | ForEach-Object {
-                Copy-Item $_.FullName (Join-Path $dst $_.Name) -Recurse -Force
+                # Pre-create the ABI subdir so Copy-Item merges into it rather than
+                # nesting the source dir inside an existing destination directory.
+                $abiDst = Join-Path $dst $_.Name
+                New-Item -ItemType Directory -Force $abiDst | Out-Null
+                Copy-Item "$($_.FullName)\*" $abiDst -Recurse -Force
             }
             Write-Host '    → unity_package/Plugins/Android/libs/'
         }

@@ -4,8 +4,9 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 using UnityEngine;
+using xyz.yewnyx.MediaSandbox;
 
-namespace xyz.yewnyx.MediaSandbox
+namespace xyz.yewnyx.MediaSandboxExample
 {
     /// <summary>
     /// Handles drag-and-drop of media files onto the Game window in Editor play mode.

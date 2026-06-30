@@ -1,0 +1,14 @@
+﻿{
+  "name": "xyz.yewnyx.MediaSandbox",
+  "rootNamespace": "xyz.yewnyx.MediaSandbox",
+  "references": [],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

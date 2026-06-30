@@ -38,7 +38,7 @@ cargo build --manifest-path decoder/Cargo.toml --bin gen_cs 2>&1 | Write-Host
 if ($LASTEXITCODE -ne 0) { Write-Error 'gen_cs build failed'; exit $LASTEXITCODE }
 
 $GenExe  = "decoder\target\debug\gen_cs.exe"
-$GenDest = 'Assets\MediaSandbox\Generated'
+$GenDest = 'unity_package\Runtime\Generated'
 New-Item -ItemType Directory -Force $GenDest | Out-Null
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 & $GenExe | Set-Content "$GenDest\SandboxLayout.g.cs" -Encoding UTF8
