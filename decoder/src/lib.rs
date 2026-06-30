@@ -51,12 +51,8 @@ pub extern "C" fn decode_image(
     let data = unsafe { std::slice::from_raw_parts(data_ptr as *const u8, data_len as usize) };
     let out = unsafe { std::slice::from_raw_parts_mut(out_ptr as *mut u8, out_len as usize) };
 
-    match img::decode(data, target_w, target_h) {
-        Ok(rgba) => {
-            let n = rgba.len().min(out.len());
-            out[..n].copy_from_slice(&rgba[..n]);
-            0
-        }
+    match img::decode(data, target_w, target_h, out) {
+        Ok(()) => 0,
         Err(_) => -1,
     }
 }
