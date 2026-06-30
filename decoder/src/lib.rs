@@ -220,6 +220,44 @@ pub extern "C" fn query_metadata(
     0
 }
 
+// ── Metadata stripping ────────────────────────────────────────────────────────
+
+/// Strips EXIF, XMP, and associated metadata from a JPEG, PNG, or WebP file
+/// without re-encoding pixel data.
+///
+/// Returns 0 on success — WASM allocates the stripped bytes; host reads *out_ptr_ptr
+/// and *out_len_ptr, copies the data, then calls dealloc(*out_ptr_ptr, *out_len_ptr).
+/// Returns 1 if the format is not supported for in-place stripping — host uses the
+/// original data as-is; out_ptr_ptr and out_len_ptr are set to 0 and must NOT be dealloc'd.
+#[no_mangle]
+pub extern "C" fn strip_metadata(
+    data_ptr: u32,
+    data_len: u32,
+    out_ptr_ptr: u32,
+    out_len_ptr: u32,
+) -> i32 {
+    let data = unsafe { std::slice::from_raw_parts(data_ptr as *const u8, data_len as usize) };
+    match meta::strip_metadata(data) {
+        Some(stripped) => {
+            let len = stripped.len() as u32;
+            let dst = alloc(len);
+            unsafe {
+                std::ptr::copy_nonoverlapping(stripped.as_ptr(), dst as *mut u8, len as usize);
+                *(out_ptr_ptr as *mut u32) = dst;
+                *(out_len_ptr as *mut u32) = len;
+            }
+            0
+        }
+        None => {
+            unsafe {
+                *(out_ptr_ptr as *mut u32) = 0;
+                *(out_len_ptr as *mut u32) = 0;
+            }
+            1
+        }
+    }
+}
+
 // ── Audio decode ─────────────────────────────────────────────────────────────
 
 /// Decodes audio to interleaved f32 PCM.

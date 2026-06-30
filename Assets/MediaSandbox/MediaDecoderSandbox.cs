@@ -461,6 +461,60 @@ namespace xyz.yewnyx.MediaSandbox
         }
 
         /// <summary>
+        /// Strips EXIF, XMP, and associated metadata from a JPEG, PNG, or WebP file
+        /// without re-encoding pixel data. Returns the stripped bytes.
+        /// For unsupported formats (TIFF, GIF, BMP, …) returns the original bytes unchanged;
+        /// use EncodeImageAsync for a clean round-trip on those formats.
+        /// </summary>
+        public Task<byte[]> StripMetadataAsync(
+            ReadOnlyMemory<byte> data, CancellationToken ct = default)
+        {
+            return Task.Run(() => {
+                var (store, instance, memory) = CreateInstance();
+                using (store)
+                {
+                    return StripMetadataCore(instance, memory, data.Span);
+                }
+            }, ct);
+        }
+
+        private static byte[] StripMetadataCore(
+            Instance instance, Memory memory, ReadOnlySpan<byte> data)
+        {
+            int outPtrAddr = WasmAlloc(instance, 4);
+            int outLenAddr = WasmAlloc(instance, 4);
+            int dataPtr    = WasmWrite(instance, memory, data);
+            try
+            {
+                int code = instance.GetFunction<int, int, int, int, int>("strip_metadata")!
+                    (dataPtr, data.Length, outPtrAddr, outLenAddr);
+
+                if (code == 1)
+                    return data.ToArray(); // format not supported — original unchanged
+
+                if (code != 0)
+                    throw new Exception($"strip_metadata failed ({code})");
+
+                int outPtr = memory.ReadInt32(outPtrAddr);
+                int outLen = memory.ReadInt32(outLenAddr);
+                try
+                {
+                    return memory.GetSpan(outPtr, outLen).ToArray();
+                }
+                finally
+                {
+                    WasmDealloc(instance, outPtr, outLen);
+                }
+            }
+            finally
+            {
+                WasmDealloc(instance, dataPtr, data.Length);
+                WasmDealloc(instance, outPtrAddr, 4);
+                WasmDealloc(instance, outLenAddr, 4);
+            }
+        }
+
+        /// <summary>
         /// Encodes raw RGBA to the requested image format.
         /// Returns compressed bytes; does not interact with Unity types.
         /// </summary>

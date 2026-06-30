@@ -116,6 +116,110 @@ fn extract_exif_fields(data: &[u8]) -> Vec<(String, String)> {
     fields
 }
 
+// ── Metadata stripping ────────────────────────────────────────────────────────
+
+/// Removes metadata segments from a JPEG file without re-encoding pixel data.
+/// Strips APP1–APP15 (EXIF, XMP, ICC, IPTC, …) and COM (comment) markers.
+/// Keeps APP0 (JFIF header) and all structural markers (SOF, DHT, DQT, SOS, …).
+/// On encountering the first SOS marker, copies from SOS to end-of-file verbatim —
+/// this is correct for both sequential and progressive JPEGs because APP markers
+/// can only appear before the first scan.
+fn strip_jpeg(data: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(data.len());
+    out.extend_from_slice(&data[..2]); // SOI
+    let mut pos = 2usize;
+    while pos + 2 <= data.len() {
+        if data[pos] != 0xFF { break; }
+        let marker = data[pos + 1];
+        match marker {
+            0xD8 => { pos += 2; } // nested SOI (unusual)
+            0xD9 => { out.extend_from_slice(&data[pos..pos + 2]); break; } // EOI
+            0xDA => { out.extend_from_slice(&data[pos..]); break; } // SOS — copy to EOF
+            0xD0..=0xD7 => { // RST0–RST7: no length field
+                out.extend_from_slice(&data[pos..pos + 2]);
+                pos += 2;
+            }
+            _ => {
+                if pos + 4 > data.len() { break; }
+                let seg_len = u16::from_be_bytes([data[pos + 2], data[pos + 3]]) as usize;
+                if pos + 2 + seg_len > data.len() { break; }
+                let keep = !matches!(marker,
+                    0xE1..=0xEF | // APP1–APP15 (EXIF, XMP, ICC, etc.)
+                    0xFE          // COM (comment)
+                );
+                if keep {
+                    out.extend_from_slice(&data[pos..pos + 2 + seg_len]);
+                }
+                pos += 2 + seg_len;
+            }
+        }
+    }
+    out
+}
+
+/// Removes metadata chunks from a PNG file.
+/// Drops: tEXt, zTXt, iTXt (XMP), eXIf. Keeps all structural chunks.
+fn strip_png(data: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(data.len());
+    out.extend_from_slice(&data[..8]); // PNG signature
+    let mut pos = 8usize;
+    while pos + 12 <= data.len() {
+        let chunk_len = u32::from_be_bytes([data[pos], data[pos+1], data[pos+2], data[pos+3]]) as usize;
+        if pos + 12 + chunk_len > data.len() { break; }
+        let chunk_type = &data[pos+4..pos+8];
+        let is_iend = chunk_type == b"IEND";
+        let strip = matches!(chunk_type, b"tEXt" | b"zTXt" | b"iTXt" | b"eXIf");
+        if !strip {
+            out.extend_from_slice(&data[pos..pos + 12 + chunk_len]);
+        }
+        pos += 12 + chunk_len;
+        if is_iend { break; }
+    }
+    out
+}
+
+/// Removes EXIF and XMP chunks from a WebP RIFF file and fixes up the file-size field.
+fn strip_webp(data: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(data.len());
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&[0u8; 4]); // size placeholder — patched at the end
+    out.extend_from_slice(b"WEBP");
+    let mut pos = 12usize;
+    while pos + 8 <= data.len() {
+        let chunk_type = &data[pos..pos + 4];
+        let chunk_size = u32::from_le_bytes([data[pos+4], data[pos+5], data[pos+6], data[pos+7]]) as usize;
+        let padded = chunk_size + (chunk_size & 1); // RIFF chunks are padded to even byte boundary
+        if pos + 8 + padded > data.len() { break; }
+        let strip = matches!(chunk_type, b"EXIF" | b"XMP ");
+        if !strip {
+            out.extend_from_slice(&data[pos..pos + 8 + padded]);
+        }
+        pos += 8 + padded;
+    }
+    let riff_size = (out.len() as u32).wrapping_sub(8);
+    out[4..8].copy_from_slice(&riff_size.to_le_bytes());
+    out
+}
+
+/// Strips all EXIF, XMP, and associated metadata from a JPEG, PNG, or WebP file
+/// without re-encoding pixel data.
+///
+/// Returns `Some(stripped_bytes)` for supported formats.
+/// Returns `None` for formats where in-place stripping is not implemented (TIFF, GIF,
+/// BMP, …); callers should fall back to a decode→encode round-trip if stripping is
+/// required for those.
+pub fn strip_metadata(data: &[u8]) -> Option<Vec<u8>> {
+    if data.starts_with(b"\xFF\xD8") {
+        Some(strip_jpeg(data))
+    } else if data.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some(strip_png(data))
+    } else if data.len() >= 12 && &data[..4] == b"RIFF" && &data[8..12] == b"WEBP" {
+        Some(strip_webp(data))
+    } else {
+        None
+    }
+}
+
 // ── Public entry point ────────────────────────────────────────────────────────
 
 /// Returns a UTF-8 JSON object with up to two keys:

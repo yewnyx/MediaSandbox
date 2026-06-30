@@ -67,6 +67,7 @@ WASM boundary (Wasmtime .NET SDK + wasmtime.dll)
   decoder.wasm                — compiled from decoder/ Rust crate
     query_attributes          — sniff format, return dimensions/duration/buffer sizes
     query_metadata            — → JSON with EXIF fields and raw XMP packet
+    strip_metadata            — removes EXIF/XMP in-place (JPEG, PNG, WebP; no re-encode)
     decode_image              — → raw RGBA bytes
     decode_animation          — → frame count, per-frame delay + RGBA
     decode_audio              — → interleaved f32 PCM, sample rate, channel count
@@ -108,7 +109,7 @@ Items that are known, understood, and explicitly deferred:
 - *Per-format target-sized decode* — large images are decoded at full resolution then scaled down. `zune-jpeg` uses 1/8, 1/4, 1/2 IDCT variants internally but does not expose a scale-factor in its 0.5 public API; PNG filter dependencies require every row regardless. Both remain full-resolution for now. See `decoder/src/img.rs`.
 
 **EXIF / metadata**
-- *EXIF/XMP stripping for network transmission* — `query_metadata` (implemented) surfaces EXIF fields and the raw XMP packet as JSON. Stripping without re-compression remains deferred: EXIF and XMP both live in JPEG APP1 segments, so removing one without disturbing the other requires careful segment rewriting. The decode→`encode_image` round-trip already produces a metadata-free file when a lossy re-encode is acceptable.
+- *TIFF metadata stripping* — `strip_metadata` handles JPEG, PNG, and WebP in-place. TIFF's IFD structure is tightly interwoven with the image data, making segment-level removal impractical without a dedicated library; use the decode→`encode_image` round-trip for TIFF when a re-encode is acceptable.
 
 **Runtime**
 - *AOT-compiled module* — Wasmtime supports ahead-of-time compilation via `Engine.PrecompileModule()` → `Module.Deserialize()`. Shipping a pre-compiled `.cwasm` file would eliminate the Cranelift JIT stall on first load (desktop) and the Pulley interpreter overhead on platforms where JIT is prohibited (iOS).
